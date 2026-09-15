@@ -35,7 +35,9 @@ use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
 use messages::{MessageStore, MAX_CHANNEL_ID_LEN, MAX_MESSAGE_CHARS};
 use snowflake::SnowflakeGenerator;
 
-const DATA_DIR: &str = "data";
+/// Pasta padrão dos dados: server/data, independente de onde o servidor foi iniciado.
+/// Defina DASCORD_DATA_DIR para usar outro local (ex: em produção).
+const DEFAULT_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
 const DEFAULT_BIND: &str = "127.0.0.1:3001";
 const DEFAULT_ALLOWED_ORIGINS: &str =
@@ -123,7 +125,9 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    let data_dir = Path::new(DATA_DIR);
+    let data_dir = std::env::var("DASCORD_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
+    let data_dir = Path::new(&data_dir);
+    println!("🗂️ Pasta de dados: {}", data_dir.display());
     let db = Arc::new(Db::open(&data_dir.join("dascord.db")).expect("Falha ao abrir o banco de dados SQLite"));
     migration::import_legacy_json(&db, data_dir);
 

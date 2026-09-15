@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dascord-server",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "--manifest-path", "server/Cargo.toml"],
+      "port": 3001
+    },
+    {
+      "name": "dascord-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 1420
+    }
+  ]
+}
