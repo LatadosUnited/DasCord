@@ -25,7 +25,8 @@ pub struct ChatMessagePayload {
 fn get_system_stats() -> SystemStats {
     SystemStats {
         app_name: "DasCord".to_string(),
-        version: "0.1.0".to_string(),
+        // Vem do Cargo.toml, que scripts/sync-version.mjs mantém igual ao package.json
+        version: env!("CARGO_PKG_VERSION").to_string(),
         engine: "Tauri v2 + WebView2 (Rust Core)".to_string(),
         ram_usage_mb: 38.4,
         rust_version: "Rust 1.96.0".to_string(),

@@ -4,11 +4,14 @@ import { SettingsTab, User } from '../types';
 import { AccountTab } from './settings/AccountTab';
 import { ProfileTab } from './settings/ProfileTab';
 import { VoiceTab } from './settings/VoiceTab';
+import { APP_VERSION } from '../services/version';
 import './settings/settings.css';
 
 interface SettingsModalProps {
   user: User;
   initialTab: SettingsTab;
+  /** null: servidor offline ou anterior à 0.2.0 */
+  serverVersion: string | null;
   onClose: () => void;
   onLogout: () => void;
   onUserUpdated: (user: User) => void;
@@ -20,7 +23,14 @@ const TABS: { id: SettingsTab; label: string; icon: typeof UserIcon }[] = [
   { id: 'voice', label: 'Voz e Áudio', icon: Mic },
 ];
 
-export const SettingsModal: FC<SettingsModalProps> = ({ user, initialTab, onClose, onLogout, onUserUpdated }) => {
+export const SettingsModal: FC<SettingsModalProps> = ({
+  user,
+  initialTab,
+  serverVersion,
+  onClose,
+  onLogout,
+  onUserUpdated,
+}) => {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   // Incrementado quando o usuário tenta sair com alterações não salvas: a barra de aviso chacoalha
@@ -61,7 +71,12 @@ export const SettingsModal: FC<SettingsModalProps> = ({ user, initialTab, onClos
         onMouseDown={(e) => e.stopPropagation()}
       >
         <header className="settings-header">
-          <span className="settings-title">Configurações de usuário</span>
+          <div className="settings-heading">
+            <span className="settings-title">Configurações de usuário</span>
+            <span className="settings-version">
+              DasCord v{APP_VERSION} · servidor {serverVersion ? `v${serverVersion}` : 'desconhecido'}
+            </span>
+          </div>
           <button className="icon-btn" onClick={guardedClose} title="Fechar (Esc)">
             <X size={20} />
           </button>

@@ -14,6 +14,8 @@ import { ConfirmDialog } from './components/ConfirmDialog';
 import { AddServerModal } from './components/servers/AddServerModal';
 import { InviteModal } from './components/servers/InviteModal';
 import { ServerSettingsModal } from './components/servers/ServerSettingsModal';
+import { VersionBanner } from './components/VersionBanner';
+import { APP_VERSION, ServerVersionInfo, apiGetServerVersion } from './services/version';
 import {
   Server,
   Channel,
@@ -78,6 +80,7 @@ export function App() {
   const [serverOnline, setServerOnline] = useState<boolean>(false);
   const [showVoiceStage, setShowVoiceStage] = useState<boolean>(false);
   const [serverDialog, setServerDialog] = useState<ServerDialog | null>(null);
+  const [serverVersion, setServerVersion] = useState<ServerVersionInfo | null>(null);
   // A primeira carga de servidores da sessão abre o DasIdeia HQ
   const openedInitialServerRef = useRef(false);
 
@@ -130,7 +133,7 @@ export function App() {
       // Fallback for direct browser preview
       setStats({
         app_name: 'DasCord (Browser Mode)',
-        version: '0.1.0',
+        version: APP_VERSION,
         engine: 'Tauri v2 + Webview2 / V8 Engine',
         ram_usage_mb: 38.4,
         rust_version: 'Rust 1.96.0',
@@ -375,6 +378,17 @@ export function App() {
     upsertServer,
     removeServerLocally,
   ]);
+
+  // Versão do servidor: ao abrir o app e a cada reconexão (ele pode ter sido atualizado)
+  useEffect(() => {
+    let cancelled = false;
+    apiGetServerVersion().then((info) => {
+      if (!cancelled && info) setServerVersion(info);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [serverOnline]);
 
   // Busca os servidores ao entrar e de novo a cada reconexão (pega o que mudou offline)
   useEffect(() => {
@@ -621,7 +635,12 @@ export function App() {
   };
 
   if (!isAuthenticated) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return (
+      <>
+        <AuthScreen onLogin={handleLogin} />
+        <VersionBanner serverVersion={serverVersion} />
+      </>
+    );
   }
 
   const closeServerDialog = () => setServerDialog(null);
@@ -729,6 +748,7 @@ export function App() {
       {showStatsModal && (
         <RustStatsModal
           stats={stats}
+          serverVersion={serverVersion?.version ?? null}
           onClose={() => setShowStatsModal(false)}
           onRefresh={fetchStats}
         />
@@ -739,11 +759,14 @@ export function App() {
         <SettingsModal
           user={currentUser}
           initialTab={settingsTab}
+          serverVersion={serverVersion?.version ?? null}
           onClose={() => setSettingsTab(null)}
           onLogout={handleLogout}
           onUserUpdated={applyUserUpdate}
         />
       )}
+
+      <VersionBanner serverVersion={serverVersion} />
 
       {/* Servidores: adicionar, convidar, configurar e sair */}
       {serverDialog?.kind === 'add' && (

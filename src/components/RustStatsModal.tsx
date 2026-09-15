@@ -1,15 +1,18 @@
 import { FC } from 'react';
 import { X, Cpu, Zap, HardDrive, Clock, ShieldCheck } from 'lucide-react';
 import { SystemStats } from '../types';
+import { APP_VERSION } from '../services/version';
 import './RustStatsModal.css';
 
 interface RustStatsModalProps {
   stats: SystemStats | null;
+  /** null: servidor offline ou anterior à 0.2.0 */
+  serverVersion: string | null;
   onClose: () => void;
   onRefresh: () => void;
 }
 
-export const RustStatsModal: FC<RustStatsModalProps> = ({ stats, onClose, onRefresh }) => {
+export const RustStatsModal: FC<RustStatsModalProps> = ({ stats, serverVersion, onClose, onRefresh }) => {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
@@ -68,6 +71,12 @@ export const RustStatsModal: FC<RustStatsModalProps> = ({ stats, onClose, onRefr
           </div>
 
           <div className="stats-engine">
+            <div>
+              <strong>Versão do app:</strong> v{APP_VERSION}
+            </div>
+            <div>
+              <strong>Versão do servidor:</strong> {serverVersion ? `v${serverVersion}` : 'desconhecida'}
+            </div>
             <div>
               <strong>Engine:</strong> {stats?.engine || 'Tauri v2 + WebView2'}
             </div>

@@ -48,6 +48,10 @@ const DEFAULT_BIND: &str = "127.0.0.1:3001";
 const DEFAULT_ALLOWED_ORIGINS: &str =
     "http://localhost:1420,http://127.0.0.1:1420,http://tauri.localhost,https://tauri.localhost,tauri://localhost";
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Versão deste servidor, vinda do Cargo.toml (sincronizado com o package.json)
+const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// App mais antigo que este servidor aceita. Suba quando a API mudar de forma incompatível.
+const MIN_CLIENT_VERSION: &str = "0.2.0";
 /// Limite de avatares e ícones de servidor
 const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
 
@@ -94,6 +98,7 @@ struct AppState {
 struct ServerInfo {
     status: String,
     service: String,
+    version: String,
     engine: String,
     active_connections: usize,
     port: u16,
@@ -176,6 +181,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root_handler))
         .route("/health", get(health_handler))
+        .route("/api/version", get(version_handler))
         .route("/api/snowflake", get(snowflake_handler))
         .route("/api/auth/register", post(register_handler))
         .route("/api/auth/login", post(login_handler))
@@ -212,7 +218,7 @@ async fn main() {
         .layer(cors)
         .with_state(state);
 
-    println!("🦀 DasCord Real-Time Rust Server listening on http://{}", addr);
+    println!("🦀 DasCord v{} Real-Time Rust Server listening on http://{}", SERVER_VERSION, addr);
     println!("⚡ WebSocket endpoint: ws://{}/ws", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
@@ -235,10 +241,16 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse
     Json(ServerInfo {
         status: "healthy".to_string(),
         service: "dascord-realtime-rust".to_string(),
+        version: SERVER_VERSION.to_string(),
         engine: "Axum + Tokio + WebSockets".to_string(),
         active_connections: connections,
         port: state.port,
     })
+}
+
+/// Versão do servidor e a mínima do app. Sem autenticação: o app confere antes do login.
+async fn version_handler() -> Json<serde_json::Value> {
+    Json(json!({ "version": SERVER_VERSION, "minClientVersion": MIN_CLIENT_VERSION }))
 }
 
 async fn snowflake_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {

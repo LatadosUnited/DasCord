@@ -1,0 +1,37 @@
+/* Aviso de versão incompatível: flutua acima de tudo, inclusive da tela de login */
+.version-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 10px 10px 10px 14px;
+  background-color: var(--bg-floating);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.45;
+  animation: popoverIn 0.15s ease;
+}
+
+.version-banner > svg {
+  flex-shrink: 0;
+  color: var(--brand);
+}
+
+.version-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.version-banner-text strong {
+  color: var(--text-header);
+}
