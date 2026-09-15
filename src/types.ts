@@ -57,11 +57,14 @@ export interface Message {
 export interface Server {
   id: string;
   name: string;
+  /** URL do ícone enviado; sem ícone, o app mostra as iniciais sobre o degradê */
   icon?: string;
   initials: string;
   gradient: string;
+  /** null no servidor do sistema (DasIdeia HQ), que ninguém pode excluir */
+  ownerId: string | null;
+  isDefault: boolean;
   unreadCount?: number;
-  hasPing?: boolean;
 }
 
 export interface VoiceParticipant {

@@ -145,7 +145,7 @@ export const ProfileTab: FC<ProfileTabProps> = ({ user, onUserUpdated, onDirtyCh
                 </span>
               </button>
               <div className="avatar-picker-actions">
-                <button type="button" className="settings-btn fit" onClick={() => fileInputRef.current?.click()}>
+                <button type="button" className="btn fit" onClick={() => fileInputRef.current?.click()}>
                   Alterar avatar
                 </button>
                 {avatarFile && (
@@ -168,7 +168,7 @@ export const ProfileTab: FC<ProfileTabProps> = ({ user, onUserUpdated, onDirtyCh
           <label className="settings-field">
             <span className="settings-label">Nome de exibição</span>
             <input
-              className="settings-input"
+              className="input"
               value={displayName}
               maxLength={MAX_DISPLAY_NAME_CHARS}
               onChange={(e) => {
@@ -220,7 +220,7 @@ export const ProfileTab: FC<ProfileTabProps> = ({ user, onUserUpdated, onDirtyCh
             <button className="link-btn" onClick={reset} disabled={saving}>
               Redefinir
             </button>
-            <button className="settings-btn success" onClick={save} disabled={saving}>
+            <button className="btn success" onClick={save} disabled={saving}>
               {saving ? 'Salvando...' : 'Salvar alterações'}
             </button>
           </div>

@@ -1,0 +1,360 @@
+/* Peças visuais usadas por vários componentes */
+
+/* ---------- Marca ---------- */
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--brand-gradient);
+  color: var(--on-brand);
+  flex-shrink: 0;
+}
+
+/* ---------- Avatar e presença ---------- */
+
+.avatar-wrapper {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* --status-ring deve ser a cor do fundo onde o avatar está */
+.status-dot,
+.status-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--status-ring, var(--bg-secondary-alt));
+}
+
+.status-dot.online,
+.status-indicator.online { background-color: var(--status-online); }
+.status-dot.idle,
+.status-indicator.idle { background-color: var(--status-idle); }
+.status-dot.dnd,
+.status-indicator.dnd { background-color: var(--status-dnd); }
+.status-dot.offline,
+.status-indicator.offline { background-color: var(--status-offline); }
+
+/* Brilho âmbar em quem está falando */
+.speaking-avatar {
+  border-radius: 50%;
+  transition: box-shadow 0.15s ease;
+}
+
+.speaking-avatar.is-speaking {
+  box-shadow: 0 0 0 2px var(--speaking), 0 0 10px var(--brand-glow);
+  animation: speakingPulse 1.4s infinite;
+}
+
+@keyframes speakingPulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--speaking), 0 0 4px var(--brand-glow); }
+  50% { box-shadow: 0 0 0 3px var(--speaking), 0 0 14px var(--brand-glow); }
+}
+
+.bot-tag {
+  background-color: var(--brand);
+  color: var(--on-brand);
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* ---------- Botões e campos ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: var(--brand);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.btn:hover {
+  background-color: var(--brand-hover);
+}
+
+.btn:active {
+  background-color: var(--brand-pressed);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.fit {
+  align-self: flex-start;
+}
+
+.btn.secondary {
+  background-color: var(--input-bg);
+  color: var(--text-normal);
+}
+
+.btn.secondary:hover {
+  background-color: #38353f;
+  color: var(--text-header);
+}
+
+.btn.danger {
+  background-color: var(--danger-soft);
+  color: var(--danger);
+}
+
+.btn.danger:hover {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}
+
+.btn.success {
+  background-color: var(--success);
+  color: var(--on-brand);
+}
+
+.btn.success:hover {
+  background-color: var(--success-hover);
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input:focus {
+  border-color: var(--brand-border);
+  box-shadow: var(--focus-ring);
+}
+
+.input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-link);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--interactive-normal);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.icon-btn:hover {
+  color: var(--interactive-active);
+  background-color: var(--bg-active);
+}
+
+/* ---------- Menus flutuantes ---------- */
+
+/* Posicionado por quem usa (ex: .user-panel abre para cima, .server-menu para baixo) */
+.popover-menu {
+  position: absolute;
+  left: 8px;
+  z-index: 500;
+  width: 280px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background-color: var(--bg-floating);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  animation: popoverIn 0.12s ease;
+  --status-ring: var(--bg-floating);
+}
+
+.popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 8px 4px;
+}
+
+.popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popover-divider {
+  height: 1px;
+  background-color: var(--border-faint);
+  margin: 6px 4px;
+}
+
+.popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.popover-item:hover {
+  background-color: var(--brand);
+  color: var(--on-brand);
+}
+
+.popover-item.selected {
+  background-color: var(--bg-active);
+}
+
+.popover-item.selected:hover {
+  background-color: var(--brand);
+}
+
+.popover-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  line-height: 1.4;
+}
+
+/* ---------- Modal ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.15s ease;
+}
+
+/* ---------- Formulários ---------- */
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.form-help {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+select.input {
+  cursor: pointer;
+}
+
+.form-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.form-feedback svg {
+  flex-shrink: 0;
+}
+
+.form-feedback.error {
+  background-color: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+}
+
+.form-feedback.success {
+  background-color: var(--success-soft);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+
+.form-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background-color: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius-md);
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.form-notice svg {
+  flex-shrink: 0;
+  color: var(--brand);
+}

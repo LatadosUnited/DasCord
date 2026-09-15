@@ -126,7 +126,7 @@ export const VoiceTab: FC = () => {
         <div className="settings-notice">
           <Info size={18} />
           <span>Permita o acesso ao microfone para ver o nome dos dispositivos.</span>
-          <button className="settings-btn fit" onClick={grantPermission}>
+          <button className="btn fit" onClick={grantPermission}>
             Permitir
           </button>
         </div>
@@ -136,7 +136,7 @@ export const VoiceTab: FC = () => {
         <label className="settings-field">
           <span className="settings-label">Dispositivo de entrada</span>
           <select
-            className="settings-input"
+            className="input"
             value={settings.inputDeviceId}
             onChange={(e) => updateVoiceSettings({ inputDeviceId: e.target.value })}
           >
@@ -152,7 +152,7 @@ export const VoiceTab: FC = () => {
         <label className="settings-field">
           <span className="settings-label">Dispositivo de saída</span>
           <select
-            className="settings-input"
+            className="input"
             value={settings.outputDeviceId}
             onChange={(e) => updateVoiceSettings({ outputDeviceId: e.target.value })}
             disabled={!supportsOutputSelection}
@@ -177,13 +177,13 @@ export const VoiceTab: FC = () => {
         </p>
         <div className="mic-test-row">
           <button
-            className={`settings-btn fit ${testing ? 'danger' : ''}`}
+            className={`btn fit ${testing ? 'danger' : ''}`}
             onClick={() => (testing ? stopTest() : startTest(settings.inputDeviceId))}
           >
             {testing ? <Square size={14} /> : <Mic size={16} />}
             {testing ? 'Parar teste' : 'Vamos checar'}
           </button>
-          <button className="settings-btn secondary fit" onClick={playTestTone} disabled={playingTone}>
+          <button className="btn secondary fit" onClick={playTestTone} disabled={playingTone}>
             <Volume2 size={16} />
             {playingTone ? 'Tocando...' : 'Testar saída'}
           </button>

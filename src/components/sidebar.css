@@ -1,0 +1,70 @@
+/* Estrutura comum às barras laterais de canais e de mensagens diretas */
+
+.channel-sidebar {
+  width: 240px;
+  background-color: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-top-left-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.server-header {
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--divider-dark);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.server-header:hover {
+  background-color: var(--bg-hover);
+}
+
+.server-header-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.server-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-header);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channels-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.channel-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 8px 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.channel-category-add {
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.channel-category-add:hover {
+  color: var(--text-normal);
+}

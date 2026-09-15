@@ -1,6 +1,7 @@
 import { FC } from 'react';
 import { Wifi, PhoneOff } from 'lucide-react';
 import { VoiceState } from '../types';
+import './VoiceConnectionBar.css';
 
 interface VoiceConnectionBarProps {
   voiceState: VoiceState;

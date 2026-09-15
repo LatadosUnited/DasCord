@@ -1,0 +1,129 @@
+.server-list {
+  width: 72px;
+  background-color: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-shrink: 0;
+}
+
+.server-item-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Indicador lateral âmbar */
+.server-pill {
+  position: absolute;
+  left: 0;
+  width: 4px;
+  height: 8px;
+  background-color: var(--brand);
+  border-radius: 0 4px 4px 0;
+  transition: height var(--transition-normal), opacity var(--transition-fast);
+  opacity: 0;
+}
+
+.server-item-wrapper:hover .server-pill {
+  height: 20px;
+  opacity: 1;
+}
+
+.server-item-wrapper.active .server-pill {
+  height: 36px;
+  opacity: 1;
+}
+
+/* Faísca: ícones sempre em "squircle" */
+.server-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-squircle);
+  background-color: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-on-color);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  position: relative;
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.server-item-wrapper:hover .server-icon {
+  transform: translateY(-1px);
+}
+
+.server-item-wrapper.active .server-icon {
+  box-shadow: 0 0 0 2px var(--bg-tertiary), 0 0 0 4px var(--brand);
+}
+
+.server-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.server-icon.home-icon {
+  background: var(--brand-gradient);
+  color: var(--on-brand);
+}
+
+.server-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background-color: var(--danger);
+  color: var(--text-on-color);
+  font-size: 11px;
+  font-weight: 800;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--bg-tertiary);
+}
+
+.server-separator {
+  width: 32px;
+  height: 2px;
+  background-color: var(--border-faint);
+  border-radius: 1px;
+  margin: 4px 0;
+}
+
+.server-action-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-squircle);
+  background-color: transparent;
+  border: 1.5px dashed var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.server-action-btn.add {
+  color: var(--brand);
+}
+
+.server-action-btn.add:hover {
+  border-style: solid;
+  border-color: var(--brand);
+  background-color: var(--brand);
+  color: var(--on-brand);
+}

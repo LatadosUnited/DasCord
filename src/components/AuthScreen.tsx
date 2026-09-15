@@ -1,16 +1,23 @@
 import { useState, FC, FormEvent } from 'react';
-import { QrCode, Sparkles, ArrowRight, ShieldCheck, User as UserIcon, AlertCircle } from 'lucide-react';
+import { QrCode, Sparkles, ArrowRight, ShieldCheck, Lightbulb, AlertCircle } from 'lucide-react';
 import { User } from '../types';
 import { apiGuestLogin, apiLogin, apiRegister, saveLocalSession } from '../services/auth';
+import './AuthScreen.css';
 
 interface AuthScreenProps {
   onLogin: (user: User) => void;
 }
 
+const AuthError: FC<{ message: string }> = ({ message }) => (
+  <div className="auth-error" role="alert">
+    <AlertCircle size={16} />
+    <span>{message}</span>
+  </div>
+);
+
 export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
-  // Form states
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -18,38 +25,34 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const switchMode = (next: 'login' | 'register') => {
+    setError(null);
+    setMode(next);
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
-      if (mode === 'register') {
-        const res = await apiRegister({
-          email,
-          username,
-          displayName: displayName.trim() ? displayName : undefined,
-          password,
-        });
+      const res =
+        mode === 'register'
+          ? await apiRegister({
+              email,
+              username,
+              displayName: displayName.trim() ? displayName : undefined,
+              password,
+            })
+          : await apiLogin({ login: email, password });
 
-        if (res.success && res.token && res.user) {
-          saveLocalSession(res.token, res.user);
-          onLogin(res.user);
-        } else {
-          setError(res.error || 'Não foi possível completar o cadastro.');
-        }
+      if (res.success && res.token && res.user) {
+        saveLocalSession(res.token, res.user);
+        onLogin(res.user);
       } else {
-        const res = await apiLogin({
-          login: email,
-          password,
-        });
-
-        if (res.success && res.token && res.user) {
-          saveLocalSession(res.token, res.user);
-          onLogin(res.user);
-        } else {
-          setError(res.error || 'E-mail ou senha incorretos.');
-        }
+        setError(
+          res.error || (mode === 'register' ? 'Não foi possível completar o cadastro.' : 'E-mail ou senha incorretos.')
+        );
       }
     } catch {
       setError('Erro ao se comunicar com o servidor Rust.');
@@ -58,7 +61,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
     }
   };
 
-  // Convidados recebem uma sessão temporária do servidor (24h, só em memória)
+  // Convidados recebem uma sessão temporária do servidor (24h)
   const handleDemoGuest = async () => {
     setError(null);
     setLoading(true);
@@ -77,39 +80,26 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
 
   return (
     <div className="auth-container">
-      {/* Animated Discord Ambient Glow */}
       <div className="auth-glow auth-glow-1" />
       <div className="auth-glow auth-glow-2" />
 
-      {/* Main Login / Register Card */}
       <div className={`auth-card ${mode === 'register' ? 'register-mode' : ''}`}>
         <div className="auth-form-side">
+          <div className="auth-brand">
+            <span className="brand-mark">
+              <Lightbulb size={16} strokeWidth={2.5} />
+            </span>
+            DasCord
+          </div>
+
           {mode === 'login' ? (
             <>
               <div className="auth-header">
                 <h2 className="auth-title">Boas-vindas de volta!</h2>
-                <p className="auth-subtitle">Estamos muito animados em te ver novamente!</p>
+                <p className="auth-subtitle">Suas ideias estavam te esperando.</p>
               </div>
 
-              {error && (
-                <div
-                  style={{
-                    backgroundColor: 'rgba(242, 63, 67, 0.15)',
-                    border: '1px solid rgba(242, 63, 67, 0.4)',
-                    color: '#fca5a5',
-                    padding: '10px 12px',
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginBottom: '12px',
-                  }}
-                >
-                  <AlertCircle size={16} color="#f23f43" />
-                  <span>{error}</span>
-                </div>
-              )}
+              {error && <AuthError message={error} />}
 
               <form onSubmit={handleSubmit} className="auth-form">
                 <div className="auth-field">
@@ -139,17 +129,12 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
                     placeholder="••••••••••••"
                     required
                   />
-                  <a href="#forgot" className="auth-link forgot-link">
+                  <a href="#forgot" className="auth-link">
                     Esqueceu sua senha?
                   </a>
                 </div>
 
-                <button
-                  type="submit"
-                  className="auth-submit-btn"
-                  disabled={loading}
-                  style={{ opacity: loading ? 0.7 : 1 }}
-                >
+                <button type="submit" className="auth-submit-btn" disabled={loading}>
                   {loading ? 'Verificando credenciais...' : 'Entrar'}
                 </button>
 
@@ -166,14 +151,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
 
                 <div className="auth-switch-text">
                   <span>Precisando de uma conta? </span>
-                  <button
-                    type="button"
-                    className="auth-switch-btn"
-                    onClick={() => {
-                      setError(null);
-                      setMode('register');
-                    }}
-                  >
+                  <button type="button" className="auth-switch-btn" onClick={() => switchMode('register')}>
                     Registre-se
                   </button>
                 </div>
@@ -183,28 +161,10 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
             <>
               <div className="auth-header">
                 <h2 className="auth-title">Criar uma conta</h2>
-                <p className="auth-subtitle">Junte-se à comunidade ultra-rápida do DasCord!</p>
+                <p className="auth-subtitle">Traga suas ideias para o DasCord.</p>
               </div>
 
-              {error && (
-                <div
-                  style={{
-                    backgroundColor: 'rgba(242, 63, 67, 0.15)',
-                    border: '1px solid rgba(242, 63, 67, 0.4)',
-                    color: '#fca5a5',
-                    padding: '10px 12px',
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginBottom: '12px',
-                  }}
-                >
-                  <AlertCircle size={16} color="#f23f43" />
-                  <span>{error}</span>
-                </div>
-              )}
+              {error && <AuthError message={error} />}
 
               <form onSubmit={handleSubmit} className="auth-form">
                 <div className="auth-field">
@@ -223,7 +183,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
                 </div>
 
                 <div className="auth-field">
-                  <label className="auth-label">Nome de Exibição</label>
+                  <label className="auth-label">Nome de exibição</label>
                   <input
                     type="text"
                     className="auth-input"
@@ -235,7 +195,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
 
                 <div className="auth-field">
                   <label className="auth-label">
-                    Nome de Usuário <span className="auth-req">*</span>
+                    Nome de usuário <span className="auth-req">*</span>
                   </label>
                   <input
                     type="text"
@@ -261,25 +221,13 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  className="auth-submit-btn"
-                  disabled={loading}
-                  style={{ opacity: loading ? 0.7 : 1 }}
-                >
+                <button type="submit" className="auth-submit-btn" disabled={loading}>
                   {loading ? 'Criando conta no Rust...' : 'Continuar'}
-                  {!loading && <ArrowRight size={16} style={{ marginLeft: 6 }} />}
+                  {!loading && <ArrowRight size={16} />}
                 </button>
 
                 <div className="auth-switch-text">
-                  <button
-                    type="button"
-                    className="auth-switch-btn"
-                    onClick={() => {
-                      setError(null);
-                      setMode('login');
-                    }}
-                  >
+                  <button type="button" className="auth-switch-btn" onClick={() => switchMode('login')}>
                     Já tem uma conta? Entrar
                   </button>
                 </div>
@@ -288,14 +236,13 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
           )}
         </div>
 
-        {/* Right QR Code Side (Classic Discord Feature) */}
         {mode === 'login' && (
           <div className="auth-qr-side">
             <div className="auth-qr-box">
               <div className="auth-qr-code">
-                <QrCode size={160} color="#1e1f22" strokeWidth={1.75} />
+                <QrCode size={160} strokeWidth={1.75} />
                 <div className="auth-qr-logo">
-                  <UserIcon size={18} color="#ffffff" />
+                  <Lightbulb size={18} strokeWidth={2.5} />
                 </div>
               </div>
             </div>
@@ -304,14 +251,13 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
               Escaneie isto com o <strong>app móvel do DasCord</strong> para entrar imediatamente sem digitar senha.
             </p>
             <div className="auth-qr-badge">
-              <ShieldCheck size={14} color="#22c55e" />
-              <span>Autenticação Segura</span>
+              <ShieldCheck size={14} />
+              <span>Autenticação segura</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Footer Branding */}
       <div className="auth-footer-badge">
         <span>DasCord Desktop • Rust + Tauri v2 • Consumo &lt;40MB RAM</span>
       </div>

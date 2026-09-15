@@ -18,6 +18,7 @@ import {
   apiDeclineFriendRequest,
 } from '../services/friends';
 import { getLocalSession } from '../services/auth';
+import './FriendsHub.css';
 
 interface FriendsHubProps {
   summary: FriendsSummary;
@@ -213,7 +214,7 @@ export const FriendsHub: FC<FriendsHubProps> = ({
 
               <div className="add-friend-tips">
                 <div className="tips-card">
-                  <Sparkles size={24} color="#5865F2" />
+                  <Sparkles size={24} className="tips-icon" />
                   <div>
                     <h4>Como funciona a identificação no DasCord?</h4>
                     <p>
@@ -237,7 +238,7 @@ export const FriendsHub: FC<FriendsHubProps> = ({
 
               {summary.incoming_requests.length === 0 ? (
                 <div className="empty-state">
-                  <Clock size={40} color="#4e5058" />
+                  <Clock size={40} className="empty-icon" />
                   <p>Nenhum pedido de amizade recebido.</p>
                 </div>
               ) : (
@@ -287,7 +288,7 @@ export const FriendsHub: FC<FriendsHubProps> = ({
 
               {summary.outgoing_requests.length > 0 && (
                 <>
-                  <h3 className="list-section-header" style={{ marginTop: '24px' }}>
+                  <h3 className="list-section-header spaced">
                     PEDIDOS ENVIADOS — {summary.outgoing_requests.length}
                   </h3>
                   <div className="requests-list">
@@ -352,7 +353,7 @@ export const FriendsHub: FC<FriendsHubProps> = ({
 
               {filteredFriends.length === 0 ? (
                 <div className="empty-state">
-                  <Users size={48} color="#4e5058" />
+                  <Users size={48} className="empty-icon" />
                   <p>
                     {activeTab === 'online'
                       ? 'Nenhum amigo online no momento.'

@@ -16,6 +16,10 @@ export interface SocketEvent {
     | 'voice-candidate'
     | 'voice-announce'
     | 'user-updated'
+    | 'server-member-joined'
+    | 'server-member-left'
+    | 'server-updated'
+    | 'server-deleted'
     | 'auth-ok'
     | 'auth-error';
   channelId: string;

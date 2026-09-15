@@ -1,6 +1,5 @@
 import { User, UserStatus } from '../types';
-import { API_URL } from './config';
-import { getLocalSession } from './auth';
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, jsonBody, request } from './api';
 
 export interface AccountInfo {
   email: string;
@@ -10,38 +9,10 @@ export interface AccountInfo {
   otherSessions: number;
 }
 
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+export type { ApiResult } from './api';
 
-export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
-export const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-
-async function request<T>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
-  const { token } = getLocalSession();
-  if (!token) return { ok: false, error: 'Sessão expirada. Entre novamente.' };
-
-  try {
-    const res = await fetch(`${API_URL}${path}`, {
-      ...init,
-      headers: { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string>) },
-    });
-    if (res.status === 413) {
-      return { ok: false, error: 'A imagem é grande demais (máximo de 2 MB).' };
-    }
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      return { ok: false, error: body?.error || `O servidor respondeu com erro ${res.status}.` };
-    }
-    return { ok: true, data: body as T };
-  } catch {
-    return { ok: false, error: 'Não foi possível conectar ao servidor.' };
-  }
-}
-
-const jsonBody = (method: string, payload: unknown): RequestInit => ({
-  method,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
+export const MAX_AVATAR_BYTES = MAX_IMAGE_BYTES;
+export const AVATAR_TYPES = IMAGE_TYPES;
 
 export const apiUpdateProfile = (displayName: string) =>
   request<{ user: User }>('/api/users/me/profile', jsonBody('PATCH', { displayName }));

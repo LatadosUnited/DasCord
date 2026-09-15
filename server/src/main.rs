@@ -31,11 +31,13 @@ mod db;
 mod friends;
 mod messages;
 mod migration;
+mod servers;
 mod snowflake;
 use auth::{AuthResponse, AuthStore, LoginError, LoginRequest, PublicUser, RegisterRequest};
 use db::Db;
 use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
 use messages::{MessageStore, MAX_CHANNEL_ID_LEN, MAX_MESSAGE_CHARS};
+use servers::{CreateInvitePayload, ServerDto, ServerError, ServerStore};
 use snowflake::SnowflakeGenerator;
 
 /// Pasta padrão dos dados: server/data, independente de onde o servidor foi iniciado.
@@ -46,12 +48,13 @@ const DEFAULT_BIND: &str = "127.0.0.1:3001";
 const DEFAULT_ALLOWED_ORIGINS: &str =
     "http://localhost:1420,http://127.0.0.1:1420,http://tauri.localhost,https://tauri.localhost,tauri://localhost";
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
+/// Limite de avatares e ícones de servidor
+const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
 
-/// Destinatários de um evento publicado no canal de broadcast
+/// Destinatários de um evento publicado no canal de broadcast.
+/// Não existe "todos": cada evento diz exatamente quem pode recebê-lo.
 #[derive(Clone)]
 enum Target {
-    All,
     Users(Vec<String>),
 }
 
@@ -63,10 +66,8 @@ struct Outbound {
 
 impl Outbound {
     fn is_for(&self, user_id: &str) -> bool {
-        match &self.target {
-            Target::All => true,
-            Target::Users(ids) => ids.iter().any(|id| id == user_id),
-        }
+        let Target::Users(ids) = &self.target;
+        ids.iter().any(|id| id == user_id)
     }
 }
 
@@ -77,12 +78,14 @@ struct AppState {
     snowflake: SnowflakeGenerator,
     auth: AuthStore,
     friends: FriendsStore,
+    servers: ServerStore,
     messages: MessageStore,
     allowed_origins: Vec<String>,
     port: u16,
-    /// Conexões WebSocket abertas por usuário: sem nenhuma, os amigos o veem offline
+    /// Conexões WebSocket abertas por usuário: sem nenhuma, os outros o veem offline
     presence: Mutex<HashMap<String, usize>>,
     avatars_dir: PathBuf,
+    icons_dir: PathBuf,
     /// Endereço público do servidor, usado para montar a URL dos avatares enviados
     public_url: String,
 }
@@ -131,7 +134,7 @@ async fn main() {
         .allow_origin(AllowOrigin::list(
             allowed_origins.iter().filter_map(|o| HeaderValue::from_str(o).ok()),
         ))
-        .allow_methods([Method::GET, Method::POST, Method::PATCH])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let data_dir = std::env::var("DASCORD_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
@@ -145,6 +148,8 @@ async fn main() {
 
     let avatars_dir = data_dir.join("avatars");
     std::fs::create_dir_all(&avatars_dir).expect("Falha ao criar a pasta de avatares");
+    let icons_dir = data_dir.join("icons");
+    std::fs::create_dir_all(&icons_dir).expect("Falha ao criar a pasta de ícones de servidor");
     let public_url = std::env::var("DASCORD_PUBLIC_URL")
         .unwrap_or_else(|_| format!("http://localhost:{}", addr.port()))
         .trim_end_matches('/')
@@ -158,11 +163,13 @@ async fn main() {
         snowflake: SnowflakeGenerator::new(1, 1),
         auth,
         friends: FriendsStore::new(db.clone()),
+        servers: ServerStore::new(db.clone()),
         messages: MessageStore::new(db),
         allowed_origins,
         port: addr.port(),
         presence: Mutex::new(HashMap::new()),
         avatars_dir: avatars_dir.clone(),
+        icons_dir: icons_dir.clone(),
         public_url,
     });
 
@@ -184,12 +191,23 @@ async fn main() {
         .route("/api/users/me/presence", patch(update_presence_handler))
         .route(
             "/api/users/me/avatar",
-            post(upload_avatar_handler).layer(DefaultBodyLimit::max(MAX_AVATAR_BYTES)),
+            post(upload_avatar_handler).layer(DefaultBodyLimit::max(MAX_IMAGE_BYTES)),
         )
         .route("/api/users/me/account", get(account_handler))
         .route("/api/users/me/password", post(change_password_handler))
         .route("/api/users/me/sessions/revoke-others", post(revoke_sessions_handler))
+        .route("/api/servers", get(list_servers_handler).post(create_server_handler))
+        .route("/api/servers/{server_id}", patch(rename_server_handler).delete(delete_server_handler))
+        .route(
+            "/api/servers/{server_id}/icon",
+            post(upload_server_icon_handler).layer(DefaultBodyLimit::max(MAX_IMAGE_BYTES)),
+        )
+        .route("/api/servers/{server_id}/leave", post(leave_server_handler))
+        .route("/api/servers/{server_id}/members", get(server_members_handler))
+        .route("/api/servers/{server_id}/invites", post(create_invite_handler))
+        .route("/api/invites/{code}/accept", post(accept_invite_handler))
         .nest_service("/avatars", ServeDir::new(&avatars_dir))
+        .nest_service("/icons", ServeDir::new(&icons_dir))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -268,7 +286,10 @@ async fn register_handler(
     let result = tokio::task::spawn_blocking(move || st.auth.register(payload, &st.snowflake)).await;
 
     match result {
-        Ok(Ok((token, user))) => auth_success(StatusCode::CREATED, token, user),
+        Ok(Ok((token, user))) => {
+            welcome_to_default_servers(&state, &user);
+            auth_success(StatusCode::CREATED, token, user)
+        }
         Ok(Err(err)) => auth_failure(StatusCode::BAD_REQUEST, err),
         Err(_) => auth_failure(StatusCode::INTERNAL_SERVER_ERROR, "Erro interno do servidor.".to_string()),
     }
@@ -294,7 +315,10 @@ async fn login_handler(
 // Handler de Sessão de Convidado (expira em 24h)
 async fn guest_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.auth.create_guest(&state.snowflake) {
-        Ok((token, user)) => auth_success(StatusCode::CREATED, token, user),
+        Ok((token, user)) => {
+            welcome_to_default_servers(&state, &user);
+            auth_success(StatusCode::CREATED, token, user)
+        }
         Err(err) => auth_failure(StatusCode::INTERNAL_SERVER_ERROR, err),
     }
 }
@@ -365,18 +389,22 @@ fn apply_presence(state: &AppState, user: &mut PublicUser) {
     }
 }
 
-/// Avisa as outras sessões do próprio usuário (status real) e os amigos (status visível)
+/// Avisa as outras sessões do próprio usuário (status real) e, com o status visível,
+/// os amigos e quem divide algum servidor com ele (listas de membros)
 fn broadcast_user_update(state: &AppState, user: &PublicUser, include_self: bool) {
     if include_self {
         let event = json!({ "type": "user-updated", "channelId": "", "data": user });
         publish(state, event, Target::Users(vec![user.id.clone()]));
     }
-    let friends = state.friends.friend_ids(&user.id);
-    if !friends.is_empty() {
+    let mut audience = state.friends.friend_ids(&user.id);
+    audience.extend(state.servers.co_member_ids(&user.id));
+    audience.sort();
+    audience.dedup();
+    if !audience.is_empty() {
         let mut visible = user.clone();
         apply_presence(state, &mut visible);
         let event = json!({ "type": "user-updated", "channelId": "", "data": visible });
-        publish(state, event, Target::Users(friends));
+        publish(state, event, Target::Users(audience));
     }
 }
 
@@ -475,26 +503,15 @@ async fn upload_avatar_handler(
             "Convidados não podem trocar o avatar. Crie uma conta para usar esse recurso.",
         );
     }
-    let Some(extension) = image_extension(&body) else {
-        return json_error(StatusCode::BAD_REQUEST, "Formato de imagem inválido. Use PNG, JPG, GIF ou WebP.");
+    let (file_name, file_path) = match save_uploaded_image(&state.avatars_dir, &user_id, &state.snowflake, &body).await {
+        Ok(saved) => saved,
+        Err(reply) => return reply,
     };
-
-    let file_name = format!("{}_{}.{}", user_id, state.snowflake.next_id_string(), extension);
-    let file_path = state.avatars_dir.join(&file_name);
-    if let Err(e) = tokio::fs::write(&file_path, &body).await {
-        eprintln!("⚠️ Falha ao salvar avatar: {}", e);
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Não foi possível salvar a imagem.");
-    }
 
     let avatars_prefix = format!("{}/avatars/", state.public_url);
     match state.auth.set_avatar(&user_id, &format!("{}{}", avatars_prefix, file_name)) {
         Ok((user, old_avatar)) => {
-            // Apaga o arquivo anterior só se ele foi enviado para este servidor
-            if let Some(old_file) = old_avatar.strip_prefix(&avatars_prefix) {
-                if !old_file.contains(['/', '\\']) && !old_file.contains("..") {
-                    let _ = tokio::fs::remove_file(state.avatars_dir.join(old_file)).await;
-                }
-            }
+            remove_replaced_upload(&state.avatars_dir, &avatars_prefix, &old_avatar).await;
             broadcast_user_update(&state, &user, true);
             (StatusCode::OK, Json(json!({ "success": true, "user": user })))
         }
@@ -502,6 +519,286 @@ async fn upload_avatar_handler(
             let _ = tokio::fs::remove_file(&file_path).await;
             json_error(StatusCode::BAD_REQUEST, &err)
         }
+    }
+}
+
+/// Salva uma imagem enviada (conferida pelos primeiros bytes). Devolve (nome do arquivo, caminho).
+async fn save_uploaded_image(
+    dir: &Path,
+    name_prefix: &str,
+    snowflake: &SnowflakeGenerator,
+    body: &[u8],
+) -> Result<(String, PathBuf), JsonReply> {
+    let Some(extension) = image_extension(body) else {
+        return Err(json_error(StatusCode::BAD_REQUEST, "Formato de imagem inválido. Use PNG, JPG, GIF ou WebP."));
+    };
+    let file_name = format!("{}_{}.{}", name_prefix, snowflake.next_id_string(), extension);
+    let file_path = dir.join(&file_name);
+    if let Err(e) = tokio::fs::write(&file_path, body).await {
+        eprintln!("⚠️ Falha ao salvar imagem: {}", e);
+        return Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, "Não foi possível salvar a imagem."));
+    }
+    Ok((file_name, file_path))
+}
+
+/// Apaga o arquivo substituído, só se ele foi enviado para esta pasta deste servidor
+async fn remove_replaced_upload(dir: &Path, public_prefix: &str, old_url: &str) {
+    if let Some(old_file) = old_url.strip_prefix(public_prefix) {
+        if !old_file.is_empty() && !old_file.contains(['/', '\\']) && !old_file.contains("..") {
+            let _ = tokio::fs::remove_file(dir.join(old_file)).await;
+        }
+    }
+}
+
+// ---------- Servidores e convites ----------
+
+fn server_error(err: ServerError) -> JsonReply {
+    match err {
+        ServerError::NotFound(msg) => json_error(StatusCode::NOT_FOUND, msg),
+        ServerError::Forbidden(msg) => json_error(StatusCode::FORBIDDEN, msg),
+        ServerError::Invalid(msg) => json_error(StatusCode::BAD_REQUEST, &msg),
+        ServerError::Internal(msg) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &msg),
+    }
+}
+
+/// Envia o evento para todos os membros atuais do servidor
+fn publish_to_server(state: &AppState, server_id: &str, event: serde_json::Value) {
+    let members = state.servers.member_ids(server_id);
+    if !members.is_empty() {
+        publish(state, event, Target::Users(members));
+    }
+}
+
+fn publish_server_updated(state: &AppState, server: &ServerDto) {
+    let event = json!({ "type": "server-updated", "channelId": "", "data": { "server": server } });
+    publish_to_server(state, &server.id, event);
+}
+
+/// Os membros (inclusive as outras sessões de quem entrou) recebem o novo membro
+fn publish_member_joined(state: &AppState, server_id: &str, user: &PublicUser) {
+    let mut visible = user.clone();
+    apply_presence(state, &mut visible);
+    let event = json!({
+        "type": "server-member-joined",
+        "channelId": "",
+        "data": { "serverId": server_id, "member": visible },
+    });
+    publish_to_server(state, server_id, event);
+}
+
+/// Toda conta e todo convidado novo entra no DasIdeia HQ
+fn welcome_to_default_servers(state: &AppState, user: &PublicUser) {
+    for server_id in state.servers.join_default_servers(&user.id) {
+        publish_member_joined(state, &server_id, user);
+    }
+}
+
+async fn list_servers_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.list_for_user(&user_id) {
+        Ok(servers) => (StatusCode::OK, Json(json!({ "servers": servers }))),
+        Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    }
+}
+
+#[derive(Deserialize)]
+struct ServerNamePayload {
+    name: String,
+}
+
+async fn create_server_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<ServerNamePayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    if state.auth.is_guest(&user_id) {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "Convidados não podem criar servidores. Crie uma conta para usar esse recurso.",
+        );
+    }
+    match state.servers.create(&user_id, &payload.name, &state.snowflake) {
+        Ok(server) => {
+            // As outras sessões do criador também passam a mostrar o servidor
+            if let Some(user) = state.auth.get_user(&user_id) {
+                publish_member_joined(&state, &server.id, &user);
+            }
+            (StatusCode::CREATED, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn rename_server_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(payload): Json<ServerNamePayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.rename(&server_id, &user_id, &payload.name) {
+        Ok(server) => {
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn upload_server_icon_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    // Confere a permissão antes de gravar qualquer arquivo (e garante que o ID existe no banco)
+    if let Err(err) = state.servers.require_owner(&server_id, &user_id) {
+        return server_error(err);
+    }
+    let (file_name, file_path) = match save_uploaded_image(&state.icons_dir, &server_id, &state.snowflake, &body).await {
+        Ok(saved) => saved,
+        Err(reply) => return reply,
+    };
+
+    let icons_prefix = format!("{}/icons/", state.public_url);
+    match state.servers.set_icon(&server_id, &user_id, &format!("{}{}", icons_prefix, file_name)) {
+        Ok((server, old_icon)) => {
+            remove_replaced_upload(&state.icons_dir, &icons_prefix, &old_icon).await;
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&file_path).await;
+            server_error(err)
+        }
+    }
+}
+
+async fn delete_server_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.delete(&server_id, &user_id) {
+        Ok((former_members, icon)) => {
+            let icons_prefix = format!("{}/icons/", state.public_url);
+            remove_replaced_upload(&state.icons_dir, &icons_prefix, &icon).await;
+            let event = json!({ "type": "server-deleted", "channelId": "", "data": { "serverId": server_id } });
+            publish(&state, event, Target::Users(former_members));
+            (StatusCode::OK, Json(json!({ "success": true })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn leave_server_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.leave(&server_id, &user_id) {
+        Ok(()) => {
+            // Os membros que ficam e as outras sessões de quem saiu
+            let mut audience = state.servers.member_ids(&server_id);
+            audience.push(user_id.clone());
+            let event = json!({
+                "type": "server-member-left",
+                "channelId": "",
+                "data": { "serverId": server_id, "userId": user_id },
+            });
+            publish(&state, event, Target::Users(audience));
+            (StatusCode::OK, Json(json!({ "success": true })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn server_members_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.members(&server_id, &user_id) {
+        Ok(mut members) => {
+            for member in members.iter_mut() {
+                apply_presence(&state, member);
+            }
+            (StatusCode::OK, Json(json!({ "members": members })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn create_invite_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateInvitePayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    if state.auth.is_guest(&user_id) {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "Convidados não podem criar convites. Crie uma conta para usar esse recurso.",
+        );
+    }
+    match state.servers.create_invite(&server_id, &user_id, &payload) {
+        Ok(invite) => (StatusCode::CREATED, Json(json!({ "success": true, "invite": invite }))),
+        Err(err) => server_error(err),
+    }
+}
+
+async fn accept_invite_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(code): AxumPath<String>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.accept_invite(&code, &user_id) {
+        Ok((server, joined)) => {
+            if joined {
+                if let Some(user) = state.auth.get_user(&user_id) {
+                    publish_member_joined(&state, &server.id, &user);
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "server": server, "alreadyMember": !joined })),
+            )
+        }
+        Err(err) => server_error(err),
     }
 }
 
@@ -578,7 +875,7 @@ async fn channel_messages_handler(
     let Some(user_id) = token.and_then(|t| state.auth.get_user_id_by_token(&t)) else {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Não autenticado" })));
     };
-    // Mesma regra do WebSocket: DMs só para os dois participantes, e só se forem amigos
+    // Mesma regra do WebSocket: DMs só entre amigos, canais de servidor só para membros
     if channel_target(&state, &user_id, &channel_id).is_none() {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "Sem acesso a este canal." })));
     }
@@ -821,15 +1118,17 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
 
     let left_channel = voice_channel.lock().unwrap().take();
     if let Some(channel_id) = left_channel {
-        let event = json!({
-            "type": "voice-leave",
-            "channelId": channel_id,
-            "data": { "userId": user_id },
-        });
-        publish(&state, event, Target::All);
+        if let Some(audience) = state.servers.channel_member_ids(&channel_id) {
+            let event = json!({
+                "type": "voice-leave",
+                "channelId": channel_id,
+                "data": { "userId": user_id },
+            });
+            publish(&state, event, Target::Users(audience));
+        }
     }
 
-    // Última conexão fechada: os amigos passam a vê-lo offline
+    // Última conexão fechada: amigos e membros dos servidores passam a vê-lo offline
     let went_offline = {
         let mut presence = state.presence.lock().unwrap();
         let remaining = presence.get_mut(&user_id).map(|count| {
@@ -911,28 +1210,47 @@ fn handle_client_event(
             target
         }
         "voice-join" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
             *voice_channel.lock().unwrap() = Some(channel_id.clone());
             event["data"]["userId"] = json!(user.id);
             event["data"]["name"] = json!(user.name);
             event["data"]["avatar"] = json!(user.avatar);
-            Target::All
+            target
         }
         "voice-leave" => {
-            let mut current = voice_channel.lock().unwrap();
-            if current.as_deref() == Some(channel_id.as_str()) {
-                *current = None;
+            {
+                let mut current = voice_channel.lock().unwrap();
+                if current.as_deref() == Some(channel_id.as_str()) {
+                    *current = None;
+                }
             }
+            // Sem exigir ser membro: quem acabou de sair do servidor ainda avisa que saiu da voz
+            let Some(audience) = state.servers.channel_member_ids(&channel_id) else {
+                return;
+            };
             event["data"]["userId"] = json!(user.id);
-            Target::All
+            Target::Users(audience)
         }
         "voice-speaking" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
             event["data"]["userId"] = json!(user.id);
-            Target::All
+            target
         }
         "voice-offer" | "voice-answer" | "voice-candidate" | "voice-announce" => {
             let Some(to) = event["data"].get("to").and_then(|t| t.as_str()).map(str::to_string) else {
                 return;
             };
+            // Sinalização só entre membros com acesso ao mesmo canal
+            let Some(Target::Users(audience)) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
+            if !audience.contains(&to) {
+                return;
+            }
             if kind == "voice-announce" {
                 if !event["data"]["user"].is_object() {
                     return;
@@ -952,11 +1270,16 @@ fn handle_client_event(
     publish(state, event, target);
 }
 
-/// Canais "dm_<a>_<b>" só chegam aos dois participantes, e só se forem amigos.
-/// Os demais canais (servidores) continuam públicos.
+/// Quem recebe os eventos de um canal, ou None se o usuário não tem acesso a ele.
+/// DMs ("dm_<a>_<b>"): só os dois participantes, e só se forem amigos.
+/// Canais de servidor: só os membros do servidor. Canal inexistente: ninguém.
 fn channel_target(state: &AppState, user_id: &str, channel_id: &str) -> Option<Target> {
     let Some(pair) = channel_id.strip_prefix("dm_") else {
-        return Some(Target::All);
+        let members = state.servers.channel_member_ids(channel_id)?;
+        if !members.iter().any(|id| id == user_id) {
+            return None;
+        }
+        return Some(Target::Users(members));
     };
     let (a, b) = pair.split_once('_')?;
     if user_id != a && user_id != b {

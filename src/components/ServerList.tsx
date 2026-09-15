@@ -1,6 +1,7 @@
 import { FC } from 'react';
-import { MessageSquare, Plus, Compass } from 'lucide-react';
+import { Lightbulb, Plus } from 'lucide-react';
 import { Server } from '../types';
+import './ServerList.css';
 
 interface ServerListProps {
   servers: Server[];
@@ -17,21 +18,20 @@ export const ServerList: FC<ServerListProps> = ({
 }) => {
   return (
     <div className="server-list">
-      {/* Direct Messages Home Button */}
+      {/* Início: amigos e mensagens diretas */}
       <div
         className={`server-item-wrapper ${activeServerId === 'home' ? 'active' : ''}`}
         onClick={() => onSelectServer('home')}
         title="Mensagens Diretas"
       >
         <div className="server-pill" />
-        <div className="server-icon discord-home">
-          <MessageSquare size={24} />
+        <div className="server-icon home-icon">
+          <Lightbulb size={24} strokeWidth={2.25} />
         </div>
       </div>
 
       <div className="server-separator" />
 
-      {/* Servers */}
       {servers.map((server) => {
         const isActive = activeServerId === server.id;
         return (
@@ -42,41 +42,24 @@ export const ServerList: FC<ServerListProps> = ({
             title={server.name}
           >
             <div className="server-pill" />
-            <div
-              className="server-icon"
-              style={{
-                background: server.gradient,
-              }}
-            >
-              <span>{server.initials}</span>
-              {server.unreadCount && server.unreadCount > 0 && (
-                <div className="server-badge">
-                  {server.unreadCount > 99 ? '99+' : server.unreadCount}
-                </div>
+            {/* Sem ícone enviado, o degradê (derivado do ID) é um dado de cada servidor */}
+            <div className="server-icon" style={server.icon ? undefined : { background: server.gradient }}>
+              {server.icon ? (
+                <img src={server.icon} alt={server.name} className="server-icon-image" />
+              ) : (
+                <span>{server.initials}</span>
+              )}
+              {!!server.unreadCount && (
+                <div className="server-badge">{server.unreadCount > 99 ? '99+' : server.unreadCount}</div>
               )}
             </div>
           </div>
         );
       })}
 
-      {/* Add Server & Explore buttons */}
       <div className="server-item-wrapper">
-        <button
-          className="server-action-btn"
-          onClick={onAddServer}
-          title="Adicionar um Servidor"
-        >
+        <button className="server-action-btn add" onClick={onAddServer} title="Adicionar um servidor">
           <Plus size={22} />
-        </button>
-      </div>
-
-      <div className="server-item-wrapper">
-        <button
-          className="server-action-btn"
-          title="Explorar Servidores Públicos"
-          style={{ color: '#22d3ee' }}
-        >
-          <Compass size={22} />
         </button>
       </div>
     </div>

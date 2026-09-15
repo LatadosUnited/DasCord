@@ -1,8 +1,11 @@
-import { FC } from 'react';
-import { Hash, Volume2, ChevronDown, MicOff, Plus } from 'lucide-react';
+import { FC, useEffect, useRef, useState } from 'react';
+import { Hash, Volume2, ChevronDown, MicOff, X } from 'lucide-react';
 import { Channel, Server, SettingsTab, User, UserStatus, VoiceState } from '../types';
 import { VoiceConnectionBar } from './VoiceConnectionBar';
 import { UserPanel } from './UserPanel';
+import { ServerMenu } from './servers/ServerMenu';
+import './sidebar.css';
+import './ChannelSidebar.css';
 
 interface ChannelSidebarProps {
   server: Server | undefined;
@@ -16,6 +19,9 @@ interface ChannelSidebarProps {
   onDisconnectVoice: () => void;
   onOpenSettings: (tab?: SettingsTab) => void;
   onChangePresence: (status: UserStatus, customStatus: string) => void;
+  onInvite: () => void;
+  onOpenServerSettings: () => void;
+  onLeaveServer: () => void;
 }
 
 export const ChannelSidebar: FC<ChannelSidebarProps> = ({
@@ -30,25 +36,69 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
   onDisconnectVoice,
   onOpenSettings,
   onChangePresence,
+  onInvite,
+  onOpenServerSettings,
+  onLeaveServer,
 }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  // Fecha o menu ao clicar fora, apertar Esc ou trocar de servidor
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (headerRef.current && !headerRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => setMenuOpen(false), [server?.id]);
+
   // Agrupar canais por categoria
   const categories = Array.from(new Set(channels.map((c) => c.category)));
 
   return (
     <div className="channel-sidebar">
-      {/* Server Header */}
-      <div className="server-header">
-        <span className="server-name">{server ? server.name : 'Mensagens Diretas'}</span>
-        <ChevronDown size={18} color="#949ba4" />
+      <div className="server-header-wrapper" ref={headerRef}>
+        <button
+          className={`server-header server-header-button ${menuOpen ? 'active' : ''}`}
+          onClick={() => server && setMenuOpen((open) => !open)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          disabled={!server}
+        >
+          <span className="server-name">{server ? server.name : 'Carregando...'}</span>
+          {menuOpen ? (
+            <X size={18} className="server-header-icon" />
+          ) : (
+            <ChevronDown size={18} className="server-header-icon" />
+          )}
+        </button>
+        {menuOpen && server && (
+          <ServerMenu
+            server={server}
+            currentUser={currentUser}
+            onInvite={onInvite}
+            onOpenSettings={onOpenServerSettings}
+            onLeave={onLeaveServer}
+            onClose={() => setMenuOpen(false)}
+          />
+        )}
       </div>
 
-      {/* Channels List */}
       <div className="channels-scroll">
         {categories.map((cat) => (
-          <div key={cat} style={{ marginBottom: '10px' }}>
+          <div key={cat} className="channel-group">
             <div className="channel-category">
               <span>{cat}</span>
-              <Plus size={14} style={{ cursor: 'pointer' }} />
             </div>
 
             {channels
@@ -60,25 +110,18 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
                 return (
                   <div key={channel.id}>
                     <div
-                      className={`channel-item ${isActive ? 'active' : ''} ${
-                        channel.unread ? 'unread' : ''
-                      }`}
+                      className={`channel-item ${isActive ? 'active' : ''} ${channel.unread ? 'unread' : ''}`}
                       onClick={() => onSelectChannel(channel)}
                     >
                       {channel.type === 'text' ? (
                         <Hash size={18} className="channel-icon" />
                       ) : (
-                        <Volume2
-                          size={18}
-                          className="channel-icon"
-                          color={isVoiceActive ? '#23a55a' : undefined}
-                        />
+                        <Volume2 size={18} className={`channel-icon ${isVoiceActive ? 'voice-live' : ''}`} />
                       )}
-                      <span style={{ flex: 1 }}>{channel.name}</span>
+                      <span className="channel-name">{channel.name}</span>
                     </div>
 
-                    {/* Members connected in this voice channel */}
-                    {isVoiceActive && voiceState.participants && voiceState.participants.length > 0 && (
+                    {isVoiceActive && voiceState.participants.length > 0 && (
                       <div className="voice-channel-members">
                         {voiceState.participants.map((p) => (
                           <div key={p.id} className="voice-member-item">
@@ -86,13 +129,11 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
                               <img
                                 src={p.avatar}
                                 alt={p.name}
-                                className={`voice-member-avatar speaking-avatar ${
-                                  p.speaking ? 'is-speaking' : ''
-                                }`}
+                                className={`voice-member-avatar speaking-avatar ${p.speaking ? 'is-speaking' : ''}`}
                               />
                             </div>
                             <span className="voice-member-name">{p.name}</span>
-                            {p.muted && <MicOff size={12} color="#f23f43" />}
+                            {p.muted && <MicOff size={12} className="voice-member-muted" />}
                           </div>
                         ))}
                       </div>
@@ -104,7 +145,6 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
         ))}
       </div>
 
-      {/* Voice Status bar if in call */}
       <VoiceConnectionBar voiceState={voiceState} onDisconnect={onDisconnectVoice} />
 
       <UserPanel

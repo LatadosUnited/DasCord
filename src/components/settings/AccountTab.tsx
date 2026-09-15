@@ -120,7 +120,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
             convidado expira em 24 horas.
           </span>
         </div>
-        <button className="settings-btn danger fit" onClick={logout}>
+        <button className="btn danger fit" onClick={logout}>
           <LogOut size={16} />
           Sair
         </button>
@@ -190,7 +190,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
 
         {!passwordOpen ? (
           <button
-            className="settings-btn fit"
+            className="btn fit"
             onClick={() => {
               setPasswordFeedback(null);
               setPasswordOpen(true);
@@ -204,7 +204,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
               <span className="settings-label">Senha atual</span>
               <input
                 type="password"
-                className="settings-input"
+                className="input"
                 autoComplete="current-password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
@@ -216,7 +216,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
               <span className="settings-label">Nova senha</span>
               <input
                 type="password"
-                className="settings-input"
+                className="input"
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -228,7 +228,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
               <span className="settings-label">Confirmar nova senha</span>
               <input
                 type="password"
-                className="settings-input"
+                className="input"
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -237,10 +237,10 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
             </label>
             <p className="settings-help">Ao trocar a senha, todas as outras sessões abertas serão encerradas.</p>
             <div className="settings-actions">
-              <button type="button" className="settings-btn secondary" onClick={resetPasswordForm}>
+              <button type="button" className="btn secondary" onClick={resetPasswordForm}>
                 Cancelar
               </button>
-              <button type="submit" className="settings-btn" disabled={savingPassword}>
+              <button type="submit" className="btn" disabled={savingPassword}>
                 {savingPassword ? 'Salvando...' : 'Salvar nova senha'}
               </button>
             </div>
@@ -261,7 +261,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
             : `Você está conectado em mais ${otherSessions} ${otherSessions === 1 ? 'dispositivo' : 'dispositivos'}.`}
         </p>
         <button
-          className="settings-btn secondary fit"
+          className="btn secondary fit"
           onClick={handleRevokeSessions}
           disabled={revoking || otherSessions === 0}
         >
@@ -271,7 +271,7 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
       </section>
 
       <section className="settings-group">
-        <button className="settings-btn danger fit" onClick={logout}>
+        <button className="btn danger fit" onClick={logout}>
           <LogOut size={16} />
           Sair da conta
         </button>

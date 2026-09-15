@@ -38,7 +38,7 @@ export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile,
         {editing ? (
           <form className="custom-status-form" onSubmit={saveCustomStatus}>
             <input
-              className="settings-input"
+              className="input"
               value={draft}
               maxLength={MAX_CUSTOM_STATUS_CHARS}
               onChange={(e) => setDraft(e.target.value)}
@@ -46,10 +46,10 @@ export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile,
               autoFocus
             />
             <div className="custom-status-actions">
-              <button type="button" className="settings-btn secondary" onClick={() => setEditing(false)}>
+              <button type="button" className="btn secondary" onClick={() => setEditing(false)}>
                 Cancelar
               </button>
-              <button type="submit" className="settings-btn">
+              <button type="submit" className="btn">
                 Salvar
               </button>
             </div>

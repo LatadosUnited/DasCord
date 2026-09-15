@@ -1,26 +1,46 @@
 import { FC } from 'react';
+import { Crown } from 'lucide-react';
 import { User } from '../types';
+import './MemberList.css';
 
 interface MemberListProps {
-  users: User[];
+  /** undefined enquanto a lista ainda não chegou do servidor */
+  members: User[] | undefined;
+  ownerId: string | null | undefined;
 }
 
-export const MemberList: FC<MemberListProps> = ({ users }) => {
-  const onlineUsers = users.filter((u) => u.status === 'online');
-  const idleOrDnd = users.filter((u) => u.status === 'idle' || u.status === 'dnd');
-  const offlineUsers = users.filter((u) => u.status === 'offline');
+const byName = (a: User, b: User) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+
+export const MemberList: FC<MemberListProps> = ({ members, ownerId }) => {
+  if (!members) {
+    return (
+      <div className="member-list">
+        <div className="member-group-title">Carregando membros...</div>
+      </div>
+    );
+  }
+
+  const onlineUsers = members.filter((u) => u.status === 'online').sort(byName);
+  const idleOrDnd = members.filter((u) => u.status === 'idle' || u.status === 'dnd').sort(byName);
+  const offlineUsers = members.filter((u) => u.status === 'offline').sort(byName);
 
   const renderUser = (user: User) => (
-    <div key={user.id} className="member-card">
+    <div key={user.id} className={`member-card ${user.status === 'offline' ? 'offline' : ''}`}>
       <div className="avatar-wrapper">
         <img src={user.avatar} alt={user.name} className="avatar-img" />
         <div className={`status-dot ${user.status}`} />
       </div>
       <div className="member-info">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div className="member-name-row">
+          {/* A cor do cargo é um dado do usuário */}
           <span className="member-name" style={{ color: user.roleColor }}>
             {user.name}
           </span>
+          {user.id === ownerId && (
+            <span className="member-owner" title="Dono do servidor">
+              <Crown size={13} />
+            </span>
+          )}
           {user.isBot && <span className="bot-tag">BOT</span>}
         </div>
         {user.customStatus && <span className="member-status">{user.customStatus}</span>}
@@ -30,26 +50,19 @@ export const MemberList: FC<MemberListProps> = ({ users }) => {
 
   return (
     <div className="member-list">
-      {/* Online Users */}
-      <div className="member-group-title">ONLINE — {onlineUsers.length}</div>
+      <div className="member-group-title">Online — {onlineUsers.length}</div>
       {onlineUsers.map(renderUser)}
 
-      {/* Away / DND */}
       {idleOrDnd.length > 0 && (
         <>
-          <div className="member-group-title" style={{ marginTop: '16px' }}>
-            AUSENTE / OCUPADO — {idleOrDnd.length}
-          </div>
+          <div className="member-group-title spaced">Ausente / ocupado — {idleOrDnd.length}</div>
           {idleOrDnd.map(renderUser)}
         </>
       )}
 
-      {/* Offline */}
       {offlineUsers.length > 0 && (
         <>
-          <div className="member-group-title" style={{ marginTop: '16px' }}>
-            OFFLINE — {offlineUsers.length}
-          </div>
+          <div className="member-group-title spaced">Offline — {offlineUsers.length}</div>
           {offlineUsers.map(renderUser)}
         </>
       )}

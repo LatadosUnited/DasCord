@@ -1,0 +1,265 @@
+/* ---------- Adicionar servidor ---------- */
+
+.choice-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+  color: var(--text-normal);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.choice-card:hover:not(:disabled) {
+  border-color: var(--brand-border);
+  background-color: var(--bg-hover);
+}
+
+.choice-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.choice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: var(--radius-squircle);
+  background-color: var(--brand-soft);
+  color: var(--brand);
+}
+
+.choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-text strong {
+  font-size: 15px;
+  color: var(--text-header);
+}
+
+.choice-text small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.choice-chevron {
+  flex-shrink: 0;
+  color: var(--text-subtle);
+}
+
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------- Seletor de ícone ---------- */
+
+.icon-picker {
+  position: relative;
+  align-self: center;
+  width: 88px;
+  height: 88px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px dashed var(--brand-border);
+  border-radius: 22px;
+  background-color: var(--bg-tertiary);
+  color: var(--brand);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.icon-picker.filled {
+  border-style: solid;
+}
+
+.icon-picker:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+.icon-picker:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.icon-picker img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.icon-picker-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.icon-picker-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(8, 7, 10, 0.6);
+  color: var(--brand);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.icon-picker:hover .icon-picker-overlay,
+.icon-picker:focus-visible .icon-picker-overlay {
+  opacity: 1;
+}
+
+.icon-picker-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Ícone do servidor: imagem enviada ou iniciais sobre o degradê */
+.server-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-secondary);
+  color: var(--text-on-color);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+/* ---------- Convite ---------- */
+
+.invite-code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-code {
+  font-family: var(--font-code);
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  color: var(--text-header);
+}
+
+.invite-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .invite-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Configurações do servidor ---------- */
+
+.server-settings-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.form-row .form-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background-color: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+}
+
+.danger-zone-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-normal);
+}
+
+.danger-zone-text strong {
+  font-size: 14px;
+  color: var(--danger-text);
+}
+
+.danger-zone-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* ---------- Menu do servidor ---------- */
+
+.popover-menu.server-menu {
+  top: calc(100% + 4px);
+  bottom: auto;
+  left: 8px;
+  right: 8px;
+  width: auto;
+}
+
+.popover-item-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.popover-item.accent {
+  color: var(--brand);
+}
+
+.popover-item.accent:hover {
+  color: var(--on-brand);
+}
+
+.popover-item.danger {
+  color: var(--danger-text);
+}
+
+.popover-item.danger:hover {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}

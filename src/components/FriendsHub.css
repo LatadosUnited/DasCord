@@ -1,0 +1,561 @@
+.friends-hub-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+  height: 100%;
+  overflow: hidden;
+  --status-ring: var(--bg-secondary);
+}
+
+/* ---------- Cabeçalho e abas ---------- */
+
+.friends-header {
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--divider-dark);
+  flex-shrink: 0;
+}
+
+.friends-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
+}
+
+.friends-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text-header);
+}
+
+.friends-header-title .header-icon {
+  color: var(--text-subtle);
+}
+
+.header-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border-strong);
+}
+
+.friends-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--interactive-normal);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.tab-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--interactive-hover);
+}
+
+.tab-btn.active {
+  background-color: var(--bg-active);
+  color: var(--interactive-active);
+}
+
+/* "Adicionar amigo" leva a cor da marca */
+.tab-btn.add-btn {
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.tab-btn.add-btn:hover {
+  background-color: var(--brand-soft);
+  color: var(--brand);
+}
+
+.tab-btn.add-btn.active {
+  background-color: var(--brand);
+  color: var(--on-brand);
+}
+
+.pending-badge {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  line-height: 14px;
+}
+
+/* ---------- Corpo ---------- */
+
+.friends-main-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.friends-content-column {
+  flex: 1;
+  padding: 24px 30px;
+  overflow-y: auto;
+}
+
+.active-now-column {
+  width: 360px;
+  border-left: 1px solid var(--border-faint);
+  padding: 24px 16px;
+  overflow-y: auto;
+}
+
+.active-now-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-header);
+  margin-bottom: 16px;
+}
+
+.active-now-card {
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 20px 16px;
+  text-align: center;
+  border: 1px solid var(--border-subtle);
+}
+
+.active-now-card h4 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-header);
+  margin-bottom: 8px;
+}
+
+.active-now-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* ---------- Adicionar amigo ---------- */
+
+.add-friend-section {
+  max-width: 680px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-header);
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.section-subtitle {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.section-subtitle strong {
+  color: var(--brand-light);
+}
+
+.add-friend-form {
+  margin-bottom: 16px;
+}
+
+.add-friend-input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.add-friend-input-wrapper:focus-within {
+  border-color: var(--brand-border);
+  box-shadow: var(--focus-ring);
+}
+
+.add-friend-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: var(--text-normal);
+  font-family: var(--font-main);
+  padding-right: 12px;
+}
+
+.add-friend-input::placeholder {
+  color: var(--text-subtle);
+  font-size: 14px;
+}
+
+.submit-request-btn {
+  background-color: var(--brand);
+  color: var(--on-brand);
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.submit-request-btn:hover:not(:disabled) {
+  background-color: var(--brand-hover);
+}
+
+.submit-request-btn:disabled {
+  background-color: var(--brand-soft);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+
+.status-feedback-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  margin-bottom: 24px;
+  animation: fadeIn 0.15s ease;
+}
+
+.status-feedback-box.success {
+  background-color: var(--success-soft);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+
+.status-feedback-box.error {
+  background-color: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+}
+
+.add-friend-tips {
+  margin-top: 30px;
+}
+
+.tips-card {
+  display: flex;
+  gap: 16px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.tips-icon {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.tips-card h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-header);
+  margin-bottom: 6px;
+}
+
+.tips-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.tips-card code {
+  background-color: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--brand-light);
+  font-family: var(--font-code);
+}
+
+/* ---------- Pedidos pendentes ---------- */
+
+.pending-requests-section {
+  max-width: 800px;
+}
+
+.list-section-header {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.list-section-header.spaced {
+  margin-top: 24px;
+}
+
+.requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.request-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-secondary);
+  transition: border-color var(--transition-fast);
+}
+
+.request-card:hover {
+  border-color: var(--border-strong);
+}
+
+.request-user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.request-user-info .avatar-wrapper,
+.friend-info .avatar-wrapper {
+  width: 38px;
+  height: 38px;
+}
+
+.user-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.request-user-info .user-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.request-user-info .user-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-header);
+}
+
+.request-user-info .user-tag {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+.request-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.request-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--bg-tertiary);
+  color: var(--interactive-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.action-btn.accept:hover {
+  background-color: var(--success);
+  color: var(--on-brand);
+}
+
+.action-btn.decline:hover {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}
+
+/* ---------- Lista de amigos ---------- */
+
+.friends-list-section {
+  max-width: 900px;
+}
+
+.search-bar-wrapper {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.friends-search-input {
+  width: 100%;
+  height: 36px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: 0 36px 0 12px;
+  font-size: 14px;
+  color: var(--text-normal);
+  font-family: var(--font-main);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.friends-search-input:focus {
+  border-color: var(--brand-border);
+}
+
+.search-icon {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.friends-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-faint);
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border-top: 1px solid var(--border-subtle);
+  transition: background-color var(--transition-fast);
+  --status-ring: var(--bg-primary);
+}
+
+.friend-row:hover {
+  background-color: var(--bg-hover);
+}
+
+.friend-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.name-and-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.friend-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-header);
+}
+
+.friend-tag,
+.friend-status-text {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.friend-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.friend-action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--bg-secondary);
+  color: var(--interactive-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.friend-action-btn:hover {
+  background-color: var(--brand);
+  color: var(--on-brand);
+}
+
+/* ---------- Estado vazio ---------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+}
+
+.empty-icon {
+  color: var(--interactive-muted);
+}
+
+.empty-state p {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.empty-action-btn {
+  background-color: var(--brand);
+  color: var(--on-brand);
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background-color var(--transition-fast);
+}
+
+.empty-action-btn:hover {
+  background-color: var(--brand-hover);
+}

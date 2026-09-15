@@ -1,0 +1,47 @@
+.voice-bar {
+  background-color: var(--success-soft);
+  border-top: 1px solid var(--success-border);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.voice-status-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.voice-status-title {
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voice-channel-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-disconnect-btn {
+  background: none;
+  border: none;
+  color: var(--interactive-normal);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+
+.voice-disconnect-btn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}

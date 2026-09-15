@@ -117,6 +117,12 @@ pub fn import_legacy_json(db: &Db, data_dir: &Path) {
                 params![r.id, r.from_user_id, r.to_user_id, r.created_at],
             )?;
         }
+        // O esquema v3 já colocou no DasIdeia HQ quem existia; os importados entram agora
+        tx.execute(
+            "INSERT OR IGNORE INTO server_members (server_id, user_id, joined_at)
+             SELECT servers.id, users.id, ?1 FROM servers, users WHERE servers.is_default = 1",
+            [crate::db::now_ms()],
+        )?;
         tx.commit()?;
         Ok(Some((users.len(), friendship_count, request_count)))
     })();

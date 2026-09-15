@@ -17,7 +17,7 @@ interface UserPanelProps {
 
 type OpenMenu = 'status' | 'input' | 'output' | null;
 
-/** Rodapé com o usuário logado, igual ao do Discord */
+/** Rodapé com o usuário logado: status, microfone, fone e configurações */
 export const UserPanel: FC<UserPanelProps> = ({
   currentUser,
   voiceState,

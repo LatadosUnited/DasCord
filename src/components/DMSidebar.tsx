@@ -1,8 +1,10 @@
 import { FC } from 'react';
-import { Users, Sparkles, Plus, X } from 'lucide-react';
+import { Users, Lightbulb, Plus, X } from 'lucide-react';
 import { SettingsTab, User, UserStatus, VoiceState } from '../types';
 import { VoiceConnectionBar } from './VoiceConnectionBar';
 import { UserPanel } from './UserPanel';
+import './sidebar.css';
+import './DMSidebar.css';
 
 interface DMSidebarProps {
   currentUser: User;
@@ -35,7 +37,6 @@ export const DMSidebar: FC<DMSidebarProps> = ({
 }) => {
   return (
     <div className="channel-sidebar dm-sidebar">
-      {/* Search Header */}
       <div className="server-header dm-search-header">
         <button className="dm-search-bar-btn" onClick={onSelectFriendsHub}>
           <span>Encontre ou comece uma conversa</span>
@@ -43,7 +44,6 @@ export const DMSidebar: FC<DMSidebarProps> = ({
       </div>
 
       <div className="channels-scroll">
-        {/* Navigation Items */}
         <div className="dm-nav-group">
           <div
             className={`dm-nav-item ${activeDMUserId === null ? 'active' : ''}`}
@@ -53,33 +53,24 @@ export const DMSidebar: FC<DMSidebarProps> = ({
               <Users size={20} />
             </div>
             <span className="dm-nav-label">Amigos</span>
-            {pendingRequestsCount > 0 && (
-              <span className="dm-badge">{pendingRequestsCount}</span>
-            )}
+            {pendingRequestsCount > 0 && <span className="dm-badge">{pendingRequestsCount}</span>}
           </div>
 
           <div className="dm-nav-item">
-            <div className="dm-nav-icon">
-              <Sparkles size={20} color="#eb459e" />
+            <div className="dm-nav-icon highlight">
+              <Lightbulb size={20} />
             </div>
-            <span className="dm-nav-label">Nitro</span>
+            <span className="dm-nav-label">Mural de ideias</span>
           </div>
         </div>
 
-        {/* DMs Header */}
         <div className="channel-category dm-category-header">
-          <span>MENSAGENS DIRETAS</span>
-          <button
-            className="dm-add-icon-btn"
-            onClick={onSelectFriendsHub}
-            title="Criar mensagem direta"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
-          >
-            <Plus size={14} className="dm-add-icon" />
+          <span>Mensagens diretas</span>
+          <button className="dm-add-icon-btn" onClick={onSelectFriendsHub} title="Criar mensagem direta">
+            <Plus size={14} />
           </button>
         </div>
 
-        {/* DM User List */}
         <div className="dm-conversations-list">
           {friends.length === 0 ? (
             <div className="dm-empty-hint" onClick={onSelectFriendsHub}>
@@ -95,11 +86,7 @@ export const DMSidebar: FC<DMSidebarProps> = ({
                   onClick={() => onSelectFriendDM(friend)}
                 >
                   <div className="avatar-wrapper dm-avatar">
-                    <img
-                      src={friend.avatar}
-                      alt={friend.name}
-                      className="avatar-img"
-                    />
+                    <img src={friend.avatar} alt={friend.name} className="avatar-img" />
                     <div className={`status-dot ${friend.status}`} />
                   </div>
                   <div className="dm-item-info">
@@ -125,11 +112,7 @@ export const DMSidebar: FC<DMSidebarProps> = ({
         </div>
       </div>
 
-      {/* Voice Status bar if in call */}
-      <VoiceConnectionBar
-        voiceState={voiceState}
-        onDisconnect={onDisconnectVoice}
-      />
+      <VoiceConnectionBar voiceState={voiceState} onDisconnect={onDisconnectVoice} />
 
       <UserPanel
         currentUser={currentUser}
