@@ -21,14 +21,23 @@ import {
   Server,
   Channel,
   User,
+  UserStatus,
   Message,
+  SettingsTab,
   VoiceState,
   SystemStats,
 } from './types';
 import { realtimeSocket, SocketEvent } from './services/socket';
 import { webrtcVoice } from './services/webrtc';
 import { generateLocalSnowflake } from './services/snowflake';
-import { getLocalSession, clearLocalSession, apiVerifySession, apiLogout } from './services/auth';
+import {
+  getLocalSession,
+  clearLocalSession,
+  saveLocalSession,
+  apiVerifySession,
+  apiLogout,
+} from './services/auth';
+import { apiUpdatePresence } from './services/users';
 import { apiGetFriends, FriendsSummary } from './services/friends';
 import { apiGetChannelMessages, mergeMessages, withTimestamp } from './services/messages';
 
@@ -69,7 +78,7 @@ export function App() {
   // UI Panels & Modals
   const [showMemberList, setShowMemberList] = useState(true);
   const [showStatsModal, setShowStatsModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
 
   // Fetch Rust system stats via Tauri IPC
@@ -119,6 +128,24 @@ export function App() {
     setIsAuthenticated(false);
   }, []);
 
+  // Aplica um usuário atualizado pelo servidor em todos os lugares onde ele aparece
+  const applyUserUpdate = useCallback((updated: User) => {
+    const merge = (u: User) => (u.id === updated.id ? { ...u, ...updated } : u);
+    setCurrentUser(merge);
+    setUsers((prev) => prev.map(merge));
+    setActiveDMUser((prev) => (prev ? merge(prev) : prev));
+    setFriendsSummary((prev) => ({
+      friends: prev.friends.map(merge),
+      incoming_requests: prev.incoming_requests.map((r) => ({ ...r, from_user: merge(r.from_user) })),
+      outgoing_requests: prev.outgoing_requests.map((r) => ({ ...r, to_user: merge(r.to_user) })),
+    }));
+
+    const { token, user } = getLocalSession();
+    if (token && user?.id === updated.id) {
+      saveLocalSession(token, { ...user, ...updated });
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
 
@@ -154,6 +181,9 @@ export function App() {
           ...prev,
           [event.channelId]: mergeMessages(prev[event.channelId] || [], [incomingMsg]),
         }));
+      } else if (event.type === 'user-updated' && event.data) {
+        // Perfil, avatar ou status mudou (seu, em outra sessão, ou de um amigo)
+        applyUserUpdate(event.data as User);
       } else if (
         event.type === 'friend-request-received' ||
         event.type === 'friend-request-accepted'
@@ -167,7 +197,7 @@ export function App() {
       unsubAuthError();
       unsubMessages();
     };
-  }, [refreshFriends, endSession]);
+  }, [refreshFriends, endSession, applyUserUpdate]);
 
   const isDM = activeServerId === 'home' && activeDMUser !== null;
   // ID simétrico determinístico para que ambos os participantes vejam o mesmo canal de DM
@@ -377,6 +407,20 @@ export function App() {
     setShowVoiceStage(false);
   };
 
+  // Status de presença: aplica na hora e desfaz se o servidor recusar
+  const handleChangePresence = async (status: UserStatus, customStatus: string) => {
+    const previous = currentUser;
+    applyUserUpdate({ ...currentUser, status, customStatus });
+
+    const res = await apiUpdatePresence(status, customStatus);
+    if (res.ok) {
+      applyUserUpdate(res.data.user);
+    } else {
+      applyUserUpdate(previous);
+      console.warn('Não foi possível atualizar o status:', res.error);
+    }
+  };
+
   // Add Server simulation
   const handleAddServer = () => {
     const newId = `s-${Date.now()}`;
@@ -465,7 +509,8 @@ export function App() {
             onToggleMute={handleToggleMute}
             onToggleDeafen={handleToggleDeafen}
             onDisconnectVoice={handleDisconnectVoice}
-            onOpenSettings={() => setShowSettingsModal(true)}
+            onOpenSettings={(tab) => setSettingsTab(tab ?? 'account')}
+            onChangePresence={handleChangePresence}
           />
         ) : (
           <ChannelSidebar
@@ -478,7 +523,8 @@ export function App() {
             onToggleMute={handleToggleMute}
             onToggleDeafen={handleToggleDeafen}
             onDisconnectVoice={handleDisconnectVoice}
-            onOpenSettings={() => setShowSettingsModal(true)}
+            onOpenSettings={(tab) => setSettingsTab(tab ?? 'account')}
+            onChangePresence={handleChangePresence}
           />
         )}
 
@@ -525,18 +571,14 @@ export function App() {
         />
       )}
 
-      {/* User Profile & Presence Settings Modal */}
-      {showSettingsModal && (
+      {/* Configurações de usuário: Minha Conta, Perfil, Voz e Áudio */}
+      {settingsTab && (
         <SettingsModal
           user={currentUser}
-          onClose={() => setShowSettingsModal(false)}
+          initialTab={settingsTab}
+          onClose={() => setSettingsTab(null)}
           onLogout={handleLogout}
-          onSave={(updated) => {
-            setCurrentUser((prev) => ({ ...prev, ...updated }));
-            setUsers((prev) =>
-              prev.map((u) => (u.id === currentUser.id ? { ...u, ...updated } : u))
-            );
-          }}
+          onUserUpdated={applyUserUpdate}
         />
       )}
     </div>

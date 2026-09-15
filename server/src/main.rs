@@ -1,19 +1,21 @@
 use axum::{
+    body::Bytes,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path as AxumPath, Query, State,
+        DefaultBodyLimit, Path as AxumPath, Query, State,
     },
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::{Html, IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    collections::HashMap,
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -22,6 +24,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::services::ServeDir;
 
 mod auth;
 mod db;
@@ -43,6 +46,7 @@ const DEFAULT_BIND: &str = "127.0.0.1:3001";
 const DEFAULT_ALLOWED_ORIGINS: &str =
     "http://localhost:1420,http://127.0.0.1:1420,http://tauri.localhost,https://tauri.localhost,tauri://localhost";
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 
 /// Destinatários de um evento publicado no canal de broadcast
 #[derive(Clone)]
@@ -76,6 +80,11 @@ struct AppState {
     messages: MessageStore,
     allowed_origins: Vec<String>,
     port: u16,
+    /// Conexões WebSocket abertas por usuário: sem nenhuma, os amigos o veem offline
+    presence: Mutex<HashMap<String, usize>>,
+    avatars_dir: PathBuf,
+    /// Endereço público do servidor, usado para montar a URL dos avatares enviados
+    public_url: String,
 }
 
 #[derive(Serialize)]
@@ -122,7 +131,7 @@ async fn main() {
         .allow_origin(AllowOrigin::list(
             allowed_origins.iter().filter_map(|o| HeaderValue::from_str(o).ok()),
         ))
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let data_dir = std::env::var("DASCORD_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
@@ -133,6 +142,13 @@ async fn main() {
 
     let auth = AuthStore::new(db.clone());
     auth.purge_expired();
+
+    let avatars_dir = data_dir.join("avatars");
+    std::fs::create_dir_all(&avatars_dir).expect("Falha ao criar a pasta de avatares");
+    let public_url = std::env::var("DASCORD_PUBLIC_URL")
+        .unwrap_or_else(|_| format!("http://localhost:{}", addr.port()))
+        .trim_end_matches('/')
+        .to_string();
 
     // Broadcast channel with buffer for 256 messages
     let (tx, _rx) = broadcast::channel(256);
@@ -145,6 +161,9 @@ async fn main() {
         messages: MessageStore::new(db),
         allowed_origins,
         port: addr.port(),
+        presence: Mutex::new(HashMap::new()),
+        avatars_dir: avatars_dir.clone(),
+        public_url,
     });
 
     let app = Router::new()
@@ -161,6 +180,16 @@ async fn main() {
         .route("/api/friends/accept", post(accept_friend_request_handler))
         .route("/api/friends/decline", post(decline_friend_request_handler))
         .route("/api/channels/{channel_id}/messages", get(channel_messages_handler))
+        .route("/api/users/me/profile", patch(update_profile_handler))
+        .route("/api/users/me/presence", patch(update_presence_handler))
+        .route(
+            "/api/users/me/avatar",
+            post(upload_avatar_handler).layer(DefaultBodyLimit::max(MAX_AVATAR_BYTES)),
+        )
+        .route("/api/users/me/account", get(account_handler))
+        .route("/api/users/me/password", post(change_password_handler))
+        .route("/api/users/me/sessions/revoke-others", post(revoke_sessions_handler))
+        .nest_service("/avatars", ServeDir::new(&avatars_dir))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -306,8 +335,229 @@ async fn get_friends_handler(
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Não autenticado" })));
     };
     match state.friends.get_summary(&user_id) {
-        Ok(summary) => (StatusCode::OK, Json(json!(summary))),
+        Ok(mut summary) => {
+            // Quem não está conectado aparece offline, independente do status escolhido
+            for friend in summary.friends.iter_mut() {
+                apply_presence(&state, friend);
+            }
+            for request in summary.incoming_requests.iter_mut() {
+                apply_presence(&state, &mut request.from_user);
+            }
+            for request in summary.outgoing_requests.iter_mut() {
+                apply_presence(&state, &mut request.to_user);
+            }
+            (StatusCode::OK, Json(json!(summary)))
+        }
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))),
+    }
+}
+
+// ---------- Presença ----------
+
+fn is_connected(state: &AppState, user_id: &str) -> bool {
+    state.presence.lock().unwrap().get(user_id).map_or(false, |count| *count > 0)
+}
+
+/// Status como os outros enxergam: sem conexão aberta, é offline
+fn apply_presence(state: &AppState, user: &mut PublicUser) {
+    if !is_connected(state, &user.id) {
+        user.status = "offline".to_string();
+    }
+}
+
+/// Avisa as outras sessões do próprio usuário (status real) e os amigos (status visível)
+fn broadcast_user_update(state: &AppState, user: &PublicUser, include_self: bool) {
+    if include_self {
+        let event = json!({ "type": "user-updated", "channelId": "", "data": user });
+        publish(state, event, Target::Users(vec![user.id.clone()]));
+    }
+    let friends = state.friends.friend_ids(&user.id);
+    if !friends.is_empty() {
+        let mut visible = user.clone();
+        apply_presence(state, &mut visible);
+        let event = json!({ "type": "user-updated", "channelId": "", "data": visible });
+        publish(state, event, Target::Users(friends));
+    }
+}
+
+// ---------- Configurações do usuário ----------
+
+type JsonReply = (StatusCode, Json<serde_json::Value>);
+
+fn json_error(status: StatusCode, error: &str) -> JsonReply {
+    (status, Json(json!({ "success": false, "error": error })))
+}
+
+/// (token, user_id) da sessão, ou a resposta 401 pronta
+fn require_session(state: &AppState, headers: &HeaderMap) -> Result<(String, String), JsonReply> {
+    let unauthorized = || json_error(StatusCode::UNAUTHORIZED, "Sessão inválida ou expirada.");
+    let token = extract_token(headers).ok_or_else(unauthorized)?;
+    let user_id = state.auth.get_user_id_by_token(&token).ok_or_else(unauthorized)?;
+    Ok((token, user_id))
+}
+
+#[derive(Deserialize)]
+struct ProfilePayload {
+    #[serde(rename = "displayName")]
+    display_name: String,
+}
+
+async fn update_profile_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<ProfilePayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.auth.update_profile(&user_id, &payload.display_name) {
+        Ok(user) => {
+            broadcast_user_update(&state, &user, true);
+            (StatusCode::OK, Json(json!({ "success": true, "user": user })))
+        }
+        Err(err) => json_error(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+#[derive(Deserialize)]
+struct PresencePayload {
+    status: String,
+    #[serde(rename = "customStatus", default)]
+    custom_status: String,
+}
+
+async fn update_presence_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<PresencePayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.auth.update_presence(&user_id, &payload.status, &payload.custom_status) {
+        Ok(user) => {
+            broadcast_user_update(&state, &user, true);
+            (StatusCode::OK, Json(json!({ "success": true, "user": user })))
+        }
+        Err(err) => json_error(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Identifica a imagem pelos primeiros bytes, sem confiar no Content-Type
+fn image_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some("png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"GIF8") {
+        Some("gif")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+async fn upload_avatar_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    if state.auth.is_guest(&user_id) {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "Convidados não podem trocar o avatar. Crie uma conta para usar esse recurso.",
+        );
+    }
+    let Some(extension) = image_extension(&body) else {
+        return json_error(StatusCode::BAD_REQUEST, "Formato de imagem inválido. Use PNG, JPG, GIF ou WebP.");
+    };
+
+    let file_name = format!("{}_{}.{}", user_id, state.snowflake.next_id_string(), extension);
+    let file_path = state.avatars_dir.join(&file_name);
+    if let Err(e) = tokio::fs::write(&file_path, &body).await {
+        eprintln!("⚠️ Falha ao salvar avatar: {}", e);
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Não foi possível salvar a imagem.");
+    }
+
+    let avatars_prefix = format!("{}/avatars/", state.public_url);
+    match state.auth.set_avatar(&user_id, &format!("{}{}", avatars_prefix, file_name)) {
+        Ok((user, old_avatar)) => {
+            // Apaga o arquivo anterior só se ele foi enviado para este servidor
+            if let Some(old_file) = old_avatar.strip_prefix(&avatars_prefix) {
+                if !old_file.contains(['/', '\\']) && !old_file.contains("..") {
+                    let _ = tokio::fs::remove_file(state.avatars_dir.join(old_file)).await;
+                }
+            }
+            broadcast_user_update(&state, &user, true);
+            (StatusCode::OK, Json(json!({ "success": true, "user": user })))
+        }
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&file_path).await;
+            json_error(StatusCode::BAD_REQUEST, &err)
+        }
+    }
+}
+
+async fn account_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> JsonReply {
+    let (token, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.auth.account_info(&user_id, &token) {
+        Ok(Some(info)) => (StatusCode::OK, Json(json!(info))),
+        Ok(None) => json_error(StatusCode::FORBIDDEN, "Convidados não têm conta. Crie uma para usar esse recurso."),
+        Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    }
+}
+
+#[derive(Deserialize)]
+struct PasswordPayload {
+    #[serde(rename = "currentPassword")]
+    current_password: String,
+    #[serde(rename = "newPassword")]
+    new_password: String,
+}
+
+async fn change_password_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<PasswordPayload>,
+) -> JsonReply {
+    let (token, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+
+    // argon2 é CPU-bound: roda fora das threads do runtime async
+    let st = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        st.auth
+            .change_password(&user_id, &token, &payload.current_password, &payload.new_password)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(revoked)) => (StatusCode::OK, Json(json!({ "success": true, "revokedSessions": revoked }))),
+        Ok(Err(err)) => json_error(StatusCode::BAD_REQUEST, &err),
+        Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, "Erro interno do servidor."),
+    }
+}
+
+async fn revoke_sessions_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> JsonReply {
+    let (token, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.auth.revoke_other_sessions(&user_id, &token) {
+        Ok(revoked) => (StatusCode::OK, Json(json!({ "success": true, "revokedSessions": revoked }))),
+        Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
     }
 }
 
@@ -505,6 +755,18 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     }
 
     let user_id = user.id.clone();
+
+    // Primeira conexão do usuário: os amigos passam a vê-lo com o status escolhido
+    let came_online = {
+        let mut presence = state.presence.lock().unwrap();
+        let count = presence.entry(user_id.clone()).or_insert(0);
+        *count += 1;
+        *count == 1
+    };
+    if came_online {
+        broadcast_user_update(&state, &user, false);
+    }
+
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.tx.subscribe();
     // Canal de voz em que esta conexão está, para avisar os outros se ela cair
@@ -565,6 +827,24 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             "data": { "userId": user_id },
         });
         publish(&state, event, Target::All);
+    }
+
+    // Última conexão fechada: os amigos passam a vê-lo offline
+    let went_offline = {
+        let mut presence = state.presence.lock().unwrap();
+        let remaining = presence.get_mut(&user_id).map(|count| {
+            *count = count.saturating_sub(1);
+            *count
+        });
+        if remaining == Some(0) {
+            presence.remove(&user_id);
+        }
+        remaining == Some(0)
+    };
+    if went_offline {
+        if let Some(latest) = state.auth.get_user(&user_id) {
+            broadcast_user_update(&state, &latest, false);
+        }
     }
 
     state.active_connections.fetch_sub(1, Ordering::Relaxed);

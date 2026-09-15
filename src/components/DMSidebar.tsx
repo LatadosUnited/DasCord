@@ -1,16 +1,8 @@
 import { FC } from 'react';
-import {
-  Users,
-  Sparkles,
-  Plus,
-  Mic,
-  MicOff,
-  Headphones,
-  Settings,
-  X,
-} from 'lucide-react';
-import { User, VoiceState } from '../types';
+import { Users, Sparkles, Plus, X } from 'lucide-react';
+import { SettingsTab, User, UserStatus, VoiceState } from '../types';
 import { VoiceConnectionBar } from './VoiceConnectionBar';
+import { UserPanel } from './UserPanel';
 
 interface DMSidebarProps {
   currentUser: User;
@@ -23,7 +15,8 @@ interface DMSidebarProps {
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onDisconnectVoice: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
+  onChangePresence: (status: UserStatus, customStatus: string) => void;
 }
 
 export const DMSidebar: FC<DMSidebarProps> = ({
@@ -38,6 +31,7 @@ export const DMSidebar: FC<DMSidebarProps> = ({
   onToggleDeafen,
   onDisconnectVoice,
   onOpenSettings,
+  onChangePresence,
 }) => {
   return (
     <div className="channel-sidebar dm-sidebar">
@@ -137,49 +131,14 @@ export const DMSidebar: FC<DMSidebarProps> = ({
         onDisconnect={onDisconnectVoice}
       />
 
-      {/* User Footer Panel */}
-      <div className="user-panel">
-        <div className="user-info" onClick={onOpenSettings}>
-          <div className="avatar-wrapper">
-            <img
-              src={currentUser.avatar}
-              alt={currentUser.name}
-              className="avatar-img"
-            />
-            <div className={`status-dot ${currentUser.status}`} />
-          </div>
-          <div className="user-names">
-            <span className="user-display-name">{currentUser.name}</span>
-            <span className="user-subtext">
-              {currentUser.customStatus || currentUser.tag}
-            </span>
-          </div>
-        </div>
-
-        <div className="user-actions">
-          <button
-            className={`user-action-icon ${voiceState.muted ? 'danger' : ''}`}
-            onClick={onToggleMute}
-            title={voiceState.muted ? 'Desativar mudo' : 'Silenciar'}
-          >
-            {voiceState.muted ? <MicOff size={18} /> : <Mic size={18} />}
-          </button>
-          <button
-            className={`user-action-icon ${voiceState.deafened ? 'danger' : ''}`}
-            onClick={onToggleDeafen}
-            title={voiceState.deafened ? 'Ativar som' : 'Ensurdecer'}
-          >
-            <Headphones size={18} />
-          </button>
-          <button
-            className="user-action-icon"
-            onClick={onOpenSettings}
-            title="Configurações de Usuário"
-          >
-            <Settings size={18} />
-          </button>
-        </div>
-      </div>
+      <UserPanel
+        currentUser={currentUser}
+        voiceState={voiceState}
+        onToggleMute={onToggleMute}
+        onToggleDeafen={onToggleDeafen}
+        onOpenSettings={onOpenSettings}
+        onChangePresence={onChangePresence}
+      />
     </div>
   );
 };

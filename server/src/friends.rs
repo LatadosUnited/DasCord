@@ -218,6 +218,20 @@ impl FriendsStore {
         Ok(summary)
     }
 
+    pub fn friend_ids(&self, user_id: &str) -> Vec<String> {
+        let conn = self.db.conn();
+        let result = conn
+            .prepare(
+                "SELECT CASE WHEN user_a_id = ?1 THEN user_b_id ELSE user_a_id END
+                 FROM friendships WHERE user_a_id = ?1 OR user_b_id = ?1",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([user_id], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            });
+        result.map_err(internal_error).unwrap_or_default()
+    }
+
     pub fn are_friends(&self, user_a: &str, user_b: &str) -> bool {
         let (a, b) = ordered_pair(user_a, user_b);
         let conn = self.db.conn();

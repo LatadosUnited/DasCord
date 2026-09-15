@@ -1,5 +1,7 @@
 export type UserStatus = 'online' | 'idle' | 'dnd' | 'offline';
 
+export type SettingsTab = 'account' | 'profile' | 'voice';
+
 export interface User {
   id: string;
   name: string;

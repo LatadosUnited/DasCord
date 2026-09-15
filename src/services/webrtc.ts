@@ -1,5 +1,12 @@
 import { realtimeSocket, SocketEvent } from './socket';
 import { ICE_SERVERS } from './config';
+import {
+  applyOutputDevice,
+  audioInputConstraints,
+  averageVolume,
+  getVoiceSettings,
+  subscribeVoiceSettings,
+} from './voiceSettings';
 import { User, VoiceParticipant } from '../types';
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -28,6 +35,9 @@ class WebRTCVoiceService {
   // Incrementado a cada join/leave; um join que termina de aguardar com geração diferente foi cancelado
   private joinGeneration = 0;
 
+  private appliedInputDeviceId = getVoiceSettings().inputDeviceId;
+  private appliedOutputDeviceId = getVoiceSettings().outputDeviceId;
+
   constructor() {
     // Garante que a chamada seja encerrada ao fechar a janela/aba (evita ghost participants)
     if (typeof window !== 'undefined') {
@@ -35,6 +45,53 @@ class WebRTCVoiceService {
         this.leave();
       });
     }
+    subscribeVoiceSettings(() => this.handleVoiceSettingsChange());
+  }
+
+  // Aplica na hora a troca de microfone ou de saída feita nas configurações
+  private handleVoiceSettingsChange() {
+    const { inputDeviceId, outputDeviceId } = getVoiceSettings();
+
+    if (outputDeviceId !== this.appliedOutputDeviceId) {
+      this.appliedOutputDeviceId = outputDeviceId;
+      this.remoteAudioElements.forEach((audio) => applyOutputDevice(audio, outputDeviceId));
+    }
+
+    if (inputDeviceId !== this.appliedInputDeviceId) {
+      this.appliedInputDeviceId = inputDeviceId;
+      if (this.localStream) {
+        this.switchInputDevice(inputDeviceId);
+      }
+    }
+  }
+
+  private async switchInputDevice(deviceId: string) {
+    const generation = this.joinGeneration;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioInputConstraints(deviceId), video: false });
+    } catch (err) {
+      console.warn('Não foi possível trocar o microfone:', err);
+      return;
+    }
+
+    // Saiu do canal enquanto o novo microfone abria
+    if (generation !== this.joinGeneration || !this.localStream) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    const newTrack = stream.getAudioTracks()[0];
+    newTrack.enabled = !this.isMuted;
+    for (const pc of this.peerConnections.values()) {
+      const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
+      await sender?.replaceTrack(newTrack);
+    }
+
+    this.localStream.getTracks().forEach((track) => track.stop());
+    this.localStream = stream;
+    this.teardownVAD();
+    this.setupVAD(stream);
   }
 
   async join(
@@ -67,11 +124,7 @@ class WebRTCVoiceService {
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: audioInputConstraints(getVoiceSettings().inputDeviceId),
         video: false,
       });
     } catch (err) {
@@ -132,15 +185,7 @@ class WebRTCVoiceService {
       this.localStream = null;
     }
 
-    // Limpa VAD
-    if (this.vadInterval) {
-      clearInterval(this.vadInterval);
-      this.vadInterval = null;
-    }
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close().catch(() => {});
-      this.audioContext = null;
-    }
+    this.teardownVAD();
 
     // Fecha conexões P2P
     this.peerConnections.forEach((pc) => pc.close());
@@ -213,15 +258,8 @@ class WebRTCVoiceService {
       this.vadInterval = setInterval(() => {
         if (this.isMuted || !this.analyser) return;
 
-        this.analyser.getByteFrequencyData(buffer);
-        let sum = 0;
-        for (let i = 0; i < buffer.length; i++) {
-          sum += buffer[i];
-        }
-        const average = sum / buffer.length;
-
-        // Limiar de fala
-        const speakingNow = average > 14;
+        // Limiar de fala ajustável em Configurações > Voz e Áudio
+        const speakingNow = averageVolume(this.analyser, buffer) > getVoiceSettings().inputSensitivity;
         if (speakingNow !== this.isSpeaking) {
           this.isSpeaking = speakingNow;
           if (this.currentUser) {
@@ -237,6 +275,18 @@ class WebRTCVoiceService {
     } catch (e) {
       console.warn('Erro ao configurar AnalyserNode VAD:', e);
     }
+  }
+
+  private teardownVAD() {
+    if (this.vadInterval) {
+      clearInterval(this.vadInterval);
+      this.vadInterval = null;
+    }
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close().catch(() => {});
+    }
+    this.audioContext = null;
+    this.analyser = null;
   }
 
   private setupMockVAD() {
@@ -457,6 +507,7 @@ class WebRTCVoiceService {
         audio = document.createElement('audio');
         audio.autoplay = true;
         audio.muted = this.isDeafened;
+        applyOutputDevice(audio, getVoiceSettings().outputDeviceId);
         document.body.appendChild(audio);
         this.remoteAudioElements.set(peerId, audio);
       }

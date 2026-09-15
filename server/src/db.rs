@@ -64,6 +64,13 @@ CREATE TABLE messages (
 CREATE INDEX idx_messages_channel ON messages(channel_id, created_at);
 ";
 
+/// v2: status de presença escolhido pelo usuário e status personalizado
+const SCHEMA_V2: &str = "
+ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'online';
+ALTER TABLE users ADD COLUMN custom_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE guests ADD COLUMN status TEXT NOT NULL DEFAULT 'online';
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -94,6 +101,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 1 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} PRAGMA user_version = 1; COMMIT;"))?;
         println!("🗄️ Banco de dados criado (esquema v1).");
+    }
+    if version < 2 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V2} PRAGMA user_version = 2; COMMIT;"))?;
+        println!("🗄️ Banco de dados atualizado para o esquema v2 (status de presença).");
     }
     Ok(())
 }
