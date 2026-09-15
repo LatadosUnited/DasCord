@@ -108,6 +108,21 @@
   color: var(--danger);
 }
 
+/* Conexão de áudio com o participante caiu ou ainda não fechou */
+.voice-card.is-unstable .voice-card-avatar {
+  opacity: 0.45;
+}
+
+.voice-connection-label.reconnecting {
+  color: var(--status-idle);
+  font-weight: 600;
+}
+
+.voice-connection-label.failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .voice-card-mic-status {
   position: absolute;
   bottom: 0;
@@ -158,4 +173,244 @@
 
 .voice-ctrl-btn.active-danger:hover {
   background-color: var(--danger-hover);
+}
+
+.voice-ctrl-btn.active-brand {
+  background-color: var(--brand);
+  color: var(--on-brand);
+}
+
+.voice-ctrl-btn.active-brand:hover {
+  background-color: var(--brand-hover);
+  color: var(--on-brand);
+}
+
+/* ---------- Transmissão de tela ---------- */
+
+.voice-screens {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px 20px 0;
+}
+
+.screen-tile {
+  position: relative;
+  min-height: 0;
+  background-color: #000;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.screen-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.screen-tile-waiting {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.screen-tile-label {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 6px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-overlay);
+  font-size: 13px;
+}
+
+.screen-tile-name {
+  font-weight: 700;
+  color: var(--text-header);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.screen-tile-detail {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.screen-tile-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--bg-overlay);
+  color: var(--text-header);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+
+.screen-tile:hover .screen-tile-close,
+.screen-tile-close:focus-visible {
+  opacity: 1;
+}
+
+.screen-tile-close:hover {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}
+
+.voice-card-live {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+}
+
+.voice-watch-btn {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background-color: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.voice-watch-btn:hover {
+  background-color: var(--brand-hover);
+}
+
+.voice-watch-btn.watching {
+  background-color: var(--bg-active);
+  color: var(--text-normal);
+}
+
+.voice-watch-btn.watching:hover {
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}
+
+/* Com telas abertas, os participantes viram uma faixa compacta embaixo */
+.voice-stage-grid.compact {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.voice-stage-grid.compact .voice-card {
+  flex-shrink: 0;
+  width: 170px;
+  height: 130px;
+}
+
+.voice-stage-grid.compact .voice-card-avatar-wrapper {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+}
+
+.voice-stage-grid.compact .voice-card-name {
+  font-size: 14px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-stage-grid.compact .voice-watch-btn {
+  margin-top: 6px;
+}
+
+.voice-stage-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: var(--danger-soft);
+  border-top: 1px solid var(--danger-border);
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+.voice-stage-error button {
+  display: flex;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.voice-stage-error .voice-notice-action {
+  padding: 3px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.voice-stage-error .voice-notice-action:hover:not(:disabled) {
+  background-color: var(--danger-soft);
+}
+
+.voice-stage-error .voice-notice-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.voice-screen-control {
+  position: relative;
+}
+
+.popover-menu.screen-share-menu {
+  bottom: calc(100% + 10px);
+  left: 50%;
+  margin-left: -140px;
+}
+
+.screen-quality-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.screen-quality-label {
+  font-weight: 600;
+}
+
+.screen-quality-desc {
+  font-size: 11px;
+  opacity: 0.75;
 }

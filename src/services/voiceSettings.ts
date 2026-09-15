@@ -2,18 +2,79 @@ import { useSyncExternalStore } from 'react';
 
 // Preferências de voz: ficam só neste computador (localStorage)
 
+export type ScreenQualityId = '720p30' | '1080p30' | '1080p60';
+
 export interface VoiceSettings {
   inputDeviceId: string;
   outputDeviceId: string;
   /** Volume médio (0–255) a partir do qual a fala é detectada */
   inputSensitivity: number;
+  screenQuality: ScreenQualityId;
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   inputDeviceId: 'default',
   outputDeviceId: 'default',
   inputSensitivity: 14,
+  screenQuality: '1080p30',
 };
+
+export interface ScreenQualityPreset {
+  id: ScreenQualityId;
+  label: string;
+  description: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  /** Limite por espectador: na malha P2P quem transmite envia uma cópia para cada um */
+  maxBitrate: number;
+  contentHint: 'detail' | 'motion';
+}
+
+export const SCREEN_QUALITY_PRESETS: ScreenQualityPreset[] = [
+  {
+    id: '720p30',
+    label: '720p · 30 FPS',
+    description: 'Leve, para conexões mais fracas',
+    width: 1280,
+    height: 720,
+    frameRate: 30,
+    maxBitrate: 1_500_000,
+    contentHint: 'detail',
+  },
+  {
+    id: '1080p30',
+    label: '1080p · 30 FPS',
+    description: 'Texto nítido, para código e documentos',
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    maxBitrate: 3_000_000,
+    contentHint: 'detail',
+  },
+  {
+    id: '1080p60',
+    label: '1080p · 60 FPS',
+    description: 'Movimento fluido, para jogos e vídeos',
+    width: 1920,
+    height: 1080,
+    frameRate: 60,
+    maxBitrate: 6_000_000,
+    contentHint: 'motion',
+  },
+];
+
+export function screenQualityPreset(id: ScreenQualityId): ScreenQualityPreset {
+  return SCREEN_QUALITY_PRESETS.find((p) => p.id === id) ?? SCREEN_QUALITY_PRESETS[1];
+}
+
+export function screenVideoConstraints(preset: ScreenQualityPreset): MediaTrackConstraints {
+  return {
+    width: { ideal: preset.width, max: preset.width },
+    height: { ideal: preset.height, max: preset.height },
+    frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+  };
+}
 
 export const SENSITIVITY_MIN = 1;
 export const SENSITIVITY_MAX = 60;
@@ -102,7 +163,15 @@ export function deviceLabel(device: MediaDeviceInfo, index: number): string {
   return device.kind === 'audioinput' ? `Microfone ${index + 1}` : `Saída de áudio ${index + 1}`;
 }
 
-export function audioInputConstraints(deviceId: string): MediaTrackConstraints {
+/** Aceito tanto por getUserMedia quanto pelo SDK do servidor de voz */
+export interface AudioInputOptions {
+  deviceId?: { ideal: string };
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+}
+
+export function audioInputOptions(deviceId: string): AudioInputOptions {
   return {
     // Sem permissão, o navegador lista os dispositivos com ID vazio: trata como "padrão"
     deviceId: deviceId && deviceId !== 'default' ? { ideal: deviceId } : undefined,
@@ -110,6 +179,10 @@ export function audioInputConstraints(deviceId: string): MediaTrackConstraints {
     noiseSuppression: true,
     autoGainControl: true,
   };
+}
+
+export function audioInputConstraints(deviceId: string): MediaTrackConstraints {
+  return audioInputOptions(deviceId);
 }
 
 /** Volume médio (0–255) de um AnalyserNode */

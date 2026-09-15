@@ -1,4 +1,4 @@
-import { Channel, Server, User } from '../types';
+import { Channel, Server, User, VoiceParticipant } from '../types';
 import { jsonBody, request } from './api';
 
 /** Formato devolvido pela API */
@@ -109,7 +109,13 @@ export const apiLeaveServer = (serverId: string) =>
 export const apiGetServerMembers = (serverId: string) =>
   request<{ members: User[] }>(`/api/servers/${encodeURIComponent(serverId)}/members`);
 
-export const apiCreateInvite = (serverId: string, maxAgeSeconds: number | null, maxUses: number | null) =>
+/** Quem está em cada canal de voz ocupado do servidor */
+export const apiGetServerVoice = (serverId: string) =>
+  request<{ channels: Record<string, Omit<VoiceParticipant, 'speaking'>[]> }>(
+    `/api/servers/${encodeURIComponent(serverId)}/voice`
+  );
+
+export const apiCreateInvite =(serverId: string, maxAgeSeconds: number | null, maxUses: number | null) =>
   request<{ invite: Invite }>(
     `/api/servers/${encodeURIComponent(serverId)}/invites`,
     jsonBody('POST', { maxAgeSeconds, maxUses })

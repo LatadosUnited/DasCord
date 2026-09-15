@@ -1,0 +1,14 @@
+# Servidor de mídia (SFU) da voz do DasCord.
+# Suba com:  docker compose -f livekit/docker-compose.yml up -d
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: dascord-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"       # sinalização (HTTP/WebSocket)
+      - "7881:7881"       # mídia por TCP, quando UDP está bloqueado
+      - "7882:7882/udp"   # mídia por UDP (todas as conexões passam por esta porta)
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro

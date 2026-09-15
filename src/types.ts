@@ -67,6 +67,9 @@ export interface Server {
   unreadCount?: number;
 }
 
+/** Estado da conexão de áudio com um participante da nossa chamada */
+export type PeerConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'failed';
+
 export interface VoiceParticipant {
   id: string;
   name: string;
@@ -74,6 +77,10 @@ export interface VoiceParticipant {
   speaking: boolean;
   muted: boolean;
   deafened: boolean;
+  /** Transmitindo a tela no canal */
+  streaming: boolean;
+  /** Só na chamada em que estamos, e nunca para nós mesmos */
+  connection?: PeerConnectionStatus;
 }
 
 export interface VoiceState {
@@ -83,7 +90,6 @@ export interface VoiceState {
   serverName?: string;
   muted: boolean;
   deafened: boolean;
-  screenShare: boolean;
   pingMs: number;
   participants: VoiceParticipant[];
 }

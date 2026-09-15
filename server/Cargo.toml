@@ -17,6 +17,7 @@ hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 argon2 = "0.5"
 rusqlite = { version = "0.32", features = ["bundled"] }
+livekit-api = { version = "0.7.1", default-features = false, features = ["access-token"] }
 
 # argon2 sem otimização fica lento demais em builds de debug (vários segundos por login)
 [profile.dev.package.argon2]

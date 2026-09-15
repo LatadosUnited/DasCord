@@ -5,6 +5,20 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Servidor de mídia (SFU)** na voz, via LiveKit: cada pessoa envia o áudio uma vez só, em vez de uma cópia para cada participante. Sobe com `docker compose -f livekit/docker-compose.yml up -d`; sem ele, a voz continua funcionando em malha P2P.
+- **Quem está no canal de voz** aparece na lista de canais mesmo para quem não entrou na chamada, com indicador de fala, microfone mutado e "AO VIVO".
+- **Transmissão de tela** nos canais de voz: escolha de qualidade (720p30, 1080p30 ou 1080p60, ajustável durante a transmissão), selo "AO VIVO" e contador de quem está assistindo.
+- Quem está na chamada escolhe **assistir** cada transmissão; o vídeo só é enviado para quem pediu.
+
+### Alterado
+- As conexões de voz renegociam durante a chamada ("perfect negotiation"), o que também corrige o áudio de quem entra num canal onde alguém estava sem microfone liberado.
+- Mudo e ensurdecido agora chegam aos outros participantes; antes o ícone do microfone ficava desatualizado.
+
+### Corrigido
+- Conexão de voz que caía (troca de rede, VPN) deixava a pessoa muda para sempre: agora o app reinicia o ICE e mostra "Reconectando".
+- Microfone desconectado no meio da chamada troca para o padrão do sistema; sem nenhum microfone, o app avisa em vez de fingir que a pessoa está falando.
+
 ## [0.2.0] - 2026-09-15
 
 ### Adicionado

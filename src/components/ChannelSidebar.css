@@ -140,3 +140,8 @@
   color: var(--danger);
   flex-shrink: 0;
 }
+
+.voice-member-item.unstable .voice-member-avatar,
+.voice-member-item.unstable .voice-member-name {
+  opacity: 0.45;
+}

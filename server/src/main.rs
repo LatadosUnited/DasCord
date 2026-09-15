@@ -17,7 +17,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -32,13 +32,17 @@ mod friends;
 mod messages;
 mod migration;
 mod servers;
+mod sfu;
 mod snowflake;
+mod voice;
 use auth::{AuthResponse, AuthStore, LoginError, LoginRequest, PublicUser, RegisterRequest};
 use db::Db;
 use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
 use messages::{MessageStore, MAX_CHANNEL_ID_LEN, MAX_MESSAGE_CHARS};
 use servers::{CreateInvitePayload, ServerDto, ServerError, ServerStore};
+use sfu::SfuConfig;
 use snowflake::SnowflakeGenerator;
+use voice::{LeaveOutcome, VoiceMember, VoiceRegistry};
 
 /// Pasta padrão dos dados: server/data, independente de onde o servidor foi iniciado.
 /// Defina DASCORD_DATA_DIR para usar outro local (ex: em produção).
@@ -88,6 +92,12 @@ struct AppState {
     port: u16,
     /// Conexões WebSocket abertas por usuário: sem nenhuma, os outros o veem offline
     presence: Mutex<HashMap<String, usize>>,
+    /// Quem está em cada canal de voz, visível para todos os membros do servidor
+    voice: VoiceRegistry,
+    /// Servidor de mídia; sem ele a voz usa a malha P2P entre os apps
+    sfu: Option<SfuConfig>,
+    /// Identifica cada conexão WebSocket (um usuário pode ter várias)
+    next_conn_id: AtomicU64,
     avatars_dir: PathBuf,
     icons_dir: PathBuf,
     /// Endereço público do servidor, usado para montar a URL dos avatares enviados
@@ -173,6 +183,9 @@ async fn main() {
         allowed_origins,
         port: addr.port(),
         presence: Mutex::new(HashMap::new()),
+        voice: VoiceRegistry::default(),
+        sfu: SfuConfig::from_env(),
+        next_conn_id: AtomicU64::new(1),
         avatars_dir: avatars_dir.clone(),
         icons_dir: icons_dir.clone(),
         public_url,
@@ -210,6 +223,8 @@ async fn main() {
         )
         .route("/api/servers/{server_id}/leave", post(leave_server_handler))
         .route("/api/servers/{server_id}/members", get(server_members_handler))
+        .route("/api/servers/{server_id}/voice", get(server_voice_handler))
+        .route("/api/voice/token", get(voice_token_handler))
         .route("/api/servers/{server_id}/invites", post(create_invite_handler))
         .route("/api/invites/{code}/accept", post(accept_invite_handler))
         .nest_service("/avatars", ServeDir::new(&avatars_dir))
@@ -404,6 +419,7 @@ fn apply_presence(state: &AppState, user: &mut PublicUser) {
 /// Avisa as outras sessões do próprio usuário (status real) e, com o status visível,
 /// os amigos e quem divide algum servidor com ele (listas de membros)
 fn broadcast_user_update(state: &AppState, user: &PublicUser, include_self: bool) {
+    state.voice.update_profile(&user.id, &user.name, &user.avatar);
     if include_self {
         let event = json!({ "type": "user-updated", "channelId": "", "data": user });
         publish(state, event, Target::Users(vec![user.id.clone()]));
@@ -713,6 +729,7 @@ async fn delete_server_handler(
         Ok((former_members, icon)) => {
             let icons_prefix = format!("{}/icons/", state.public_url);
             remove_replaced_upload(&state.icons_dir, &icons_prefix, &icon).await;
+            state.voice.remove_server(&server_id);
             let event = json!({ "type": "server-deleted", "channelId": "", "data": { "serverId": server_id } });
             publish(&state, event, Target::Users(former_members));
             (StatusCode::OK, Json(json!({ "success": true })))
@@ -735,6 +752,9 @@ async fn leave_server_handler(
             // Os membros que ficam e as outras sessões de quem saiu
             let mut audience = state.servers.member_ids(&server_id);
             audience.push(user_id.clone());
+            if let Some(channel_id) = state.voice.remove_user_from_server(&server_id, &user_id) {
+                publish_voice_leave(&state, &channel_id, &user_id, audience.clone());
+            }
             let event = json!({
                 "type": "server-member-left",
                 "channelId": "",
@@ -765,6 +785,59 @@ async fn server_members_handler(
         }
         Err(err) => server_error(err),
     }
+}
+
+#[derive(Deserialize)]
+struct VoiceTokenQuery {
+    #[serde(rename = "channelId")]
+    channel_id: String,
+}
+
+/// Credenciais para entrar no canal no servidor de mídia.
+/// 503 quando não há SFU configurado: o app então usa a malha P2P.
+async fn voice_token_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<VoiceTokenQuery>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    let Some(sfu) = &state.sfu else {
+        return json_error(StatusCode::SERVICE_UNAVAILABLE, "Este servidor não tem servidor de voz configurado.");
+    };
+    // Mesma regra do WebSocket: só quem tem acesso ao canal
+    if channel_target(&state, &user_id, &query.channel_id).is_none() {
+        return json_error(StatusCode::FORBIDDEN, "Sem acesso a este canal.");
+    }
+    let Some(user) = state.auth.get_user(&user_id) else {
+        return json_error(StatusCode::UNAUTHORIZED, "Sessão inválida ou expirada.");
+    };
+
+    match sfu.token_for(&query.channel_id, &user.id, &user.name, &user.avatar) {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(json!({ "url": sfu.url, "token": token, "room": query.channel_id })),
+        ),
+        Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
+    }
+}
+
+/// Quem está em cada canal de voz do servidor, para a lista de canais antes de entrar
+async fn server_voice_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    if !state.servers.is_member(&server_id, &user_id) {
+        return json_error(StatusCode::NOT_FOUND, "Servidor não encontrado.");
+    }
+    (StatusCode::OK, Json(json!({ "channels": state.voice.snapshot(&server_id) })))
 }
 
 async fn create_invite_handler(
@@ -1064,6 +1137,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     }
 
     let user_id = user.id.clone();
+    let conn_id = state.next_conn_id.fetch_add(1, Ordering::Relaxed);
 
     // Primeira conexão do usuário: os amigos passam a vê-lo com o status escolhido
     let came_online = {
@@ -1114,7 +1188,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
-                Message::Text(text) => handle_client_event(&recv_state, &user, &text, &recv_voice_channel),
+                Message::Text(text) => handle_client_event(&recv_state, &user, conn_id, &text, &recv_voice_channel),
                 Message::Close(_) => break,
                 // Ping/Pong são respondidos pelo axum; binário não é usado
                 _ => {}
@@ -1130,14 +1204,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
 
     let left_channel = voice_channel.lock().unwrap().take();
     if let Some(channel_id) = left_channel {
-        if let Some(audience) = state.servers.channel_member_ids(&channel_id) {
-            let event = json!({
-                "type": "voice-leave",
-                "channelId": channel_id,
-                "data": { "userId": user_id },
-            });
-            publish(&state, event, Target::Users(audience));
-        }
+        leave_voice_channel(&state, conn_id, &channel_id, &user_id);
     }
 
     // Última conexão fechada: amigos e membros dos servidores passam a vê-lo offline
@@ -1167,6 +1234,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
 fn handle_client_event(
     state: &AppState,
     user: &PublicUser,
+    conn_id: u64,
     text: &str,
     voice_channel: &Mutex<Option<String>>,
 ) {
@@ -1225,10 +1293,28 @@ fn handle_client_event(
             let Some(target) = channel_target(state, &user.id, &channel_id) else {
                 return;
             };
-            *voice_channel.lock().unwrap() = Some(channel_id.clone());
+            let flag = |key: &str| event["data"].get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+            let member = VoiceMember {
+                id: user.id.clone(),
+                name: user.name.clone(),
+                avatar: user.avatar.clone(),
+                muted: flag("muted"),
+                deafened: flag("deafened"),
+                streaming: flag("streaming"),
+            };
+            let previous_channel = voice_channel.lock().unwrap().replace(channel_id.clone());
+            if let Some(server_id) = state.servers.channel_server_id(&channel_id) {
+                // Entrar em outro canal tira o usuário do anterior, mesmo que por outra sessão
+                if let Some(old) = state.voice.join(conn_id, &server_id, &channel_id, member.clone()) {
+                    if let Some(audience) = state.servers.channel_member_ids(&old) {
+                        publish_voice_leave(state, &old, &user.id, audience);
+                    }
+                }
+            } else if let Some(old) = previous_channel.filter(|old| *old != channel_id) {
+                leave_voice_channel(state, conn_id, &old, &user.id);
+            }
+            event["data"] = json!(member);
             event["data"]["userId"] = json!(user.id);
-            event["data"]["name"] = json!(user.name);
-            event["data"]["avatar"] = json!(user.avatar);
             target
         }
         "voice-leave" => {
@@ -1238,12 +1324,35 @@ fn handle_client_event(
                     *current = None;
                 }
             }
-            // Sem exigir ser membro: quem acabou de sair do servidor ainda avisa que saiu da voz
-            let Some(audience) = state.servers.channel_member_ids(&channel_id) else {
+            leave_voice_channel(state, conn_id, &channel_id, &user.id);
+            return;
+        }
+        // Microfone/fone mudou: todo o servidor vê, inclusive quem não está na chamada
+        "voice-state" | "screen-start" | "screen-stop" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
                 return;
             };
-            event["data"]["userId"] = json!(user.id);
-            Target::Users(audience)
+            let data = &event["data"];
+            let muted = data.get("muted").and_then(|v| v.as_bool());
+            let deafened = data.get("deafened").and_then(|v| v.as_bool());
+            let present = state.voice.update(conn_id, &channel_id, &user.id, |member| match kind.as_str() {
+                "screen-start" => member.streaming = true,
+                "screen-stop" => member.streaming = false,
+                _ => {
+                    member.muted = muted.unwrap_or(member.muted);
+                    member.deafened = deafened.unwrap_or(member.deafened);
+                }
+            });
+            // Canais de servidor só aceitam quem está na chamada (DMs não entram no registro)
+            if !present && state.servers.channel_server_id(&channel_id).is_some() {
+                return;
+            }
+            event["data"] = json!({ "userId": user.id });
+            if kind == "voice-state" {
+                event["data"]["muted"] = json!(muted.unwrap_or(false));
+                event["data"]["deafened"] = json!(deafened.unwrap_or(false));
+            }
+            target
         }
         "voice-speaking" => {
             let Some(target) = channel_target(state, &user.id, &channel_id) else {
@@ -1252,7 +1361,8 @@ fn handle_client_event(
             event["data"]["userId"] = json!(user.id);
             target
         }
-        "voice-offer" | "voice-answer" | "voice-candidate" | "voice-announce" => {
+        // screen-watch/unwatch: o espectador pede a quem transmite para enviar (ou parar de enviar) a tela
+        "voice-offer" | "voice-answer" | "voice-candidate" | "voice-announce" | "screen-watch" | "screen-unwatch" => {
             let Some(to) = event["data"].get("to").and_then(|t| t.as_str()).map(str::to_string) else {
                 return;
             };
@@ -1280,6 +1390,27 @@ fn handle_client_event(
     };
 
     publish(state, event, target);
+}
+
+/// Tira a conexão do canal de voz e avisa os membros.
+/// Sem exigir ser membro: quem acabou de sair do servidor ainda avisa que saiu da voz.
+fn leave_voice_channel(state: &AppState, conn_id: u64, channel_id: &str, user_id: &str) {
+    // Se o usuário está no canal por outra sessão, para os outros ele continua lá
+    if let LeaveOutcome::HeldByOtherConnection = state.voice.leave(conn_id, channel_id, user_id) {
+        return;
+    }
+    if let Some(audience) = state.servers.channel_member_ids(channel_id) {
+        publish_voice_leave(state, channel_id, user_id, audience);
+    }
+}
+
+fn publish_voice_leave(state: &AppState, channel_id: &str, user_id: &str, audience: Vec<String>) {
+    let event = json!({
+        "type": "voice-leave",
+        "channelId": channel_id,
+        "data": { "userId": user_id },
+    });
+    publish(state, event, Target::Users(audience));
 }
 
 /// Quem recebe os eventos de um canal, ou None se o usuário não tem acesso a ele.

@@ -27,7 +27,7 @@ import {
   SystemStats,
 } from './types';
 import { realtimeSocket, SocketEvent } from './services/socket';
-import { webrtcVoice } from './services/webrtc';
+import { voice } from './services/voice';
 import { generateLocalSnowflake } from './services/snowflake';
 import {
   getLocalSession,
@@ -41,7 +41,14 @@ import './App.css';
 import { apiGetFriends, FriendsSummary } from './services/friends';
 import { apiGetChannelMessages, mergeMessages, withTimestamp } from './services/messages';
 import {
+  VoiceRosters,
+  applyVoiceRosterEvent,
+  replaceServerRosters,
+  rostersFromSnapshot,
+} from './services/voiceRoster';
+import {
   ServerDto,
+  apiGetServerVoice,
   apiGetServerMembers,
   apiLeaveServer,
   apiListServers,
@@ -97,11 +104,12 @@ export function App() {
     connected: false,
     muted: false,
     deafened: false,
-    screenShare: false,
     pingMs: 14,
     participants: [],
   });
   const mutedBeforeDeafenRef = useRef(false);
+  // Quem está em cada canal de voz, mesmo sem entrar na chamada
+  const [voiceRosters, setVoiceRosters] = useState<VoiceRosters>({});
 
   // Valores lidos dentro dos listeners do WebSocket, que não enxergam o estado atual
   const currentUserIdRef = useRef('');
@@ -154,7 +162,7 @@ export function App() {
   }, []);
 
   const leaveVoice = useCallback(() => {
-    webrtcVoice.leave();
+    voice.leave();
     setVoiceState((prev) => ({
       ...prev,
       connected: false,
@@ -177,6 +185,7 @@ export function App() {
     setServers([]);
     setChannels([]);
     setMembers({});
+    setVoiceRosters({});
     setMessages({});
     setActiveServerId('home');
     setActiveChannelId('');
@@ -322,11 +331,17 @@ export function App() {
 
     const unsubStatus = realtimeSocket.subscribeStatus((connected) => {
       setServerOnline(connected);
+      // Eventos perdidos enquanto offline: a lista volta completa ao reconectar
+      if (!connected) setVoiceRosters({});
     });
     // O servidor recusou o token na conexão do WebSocket (ex: sessão expirou)
     const unsubAuthError = realtimeSocket.subscribeAuthError(endSession);
 
     const unsubMessages = realtimeSocket.subscribeMessages((event: SocketEvent) => {
+      if (event.type.startsWith('voice-') || event.type.startsWith('screen-')) {
+        setVoiceRosters((prev) => applyVoiceRosterEvent(prev, event));
+        return;
+      }
       if (event.type === 'message' && event.data) {
         const incomingMsg: Message = withTimestamp(event.data);
         setMessages((prev) => ({
@@ -451,6 +466,13 @@ export function App() {
       if (cancelled || !res.ok) return;
       setMembers((prev) => ({ ...prev, [memberListServerId]: res.data.members }));
     });
+    apiGetServerVoice(memberListServerId).then((res) => {
+      if (cancelled || !res.ok) return;
+      const channelIds = channelsRef.current.filter((c) => c.serverId === memberListServerId).map((c) => c.id);
+      setVoiceRosters((prev) =>
+        replaceServerRosters(prev, channelIds, rostersFromSnapshot(res.data.channels))
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -471,7 +493,7 @@ export function App() {
     if (channel.type === 'voice') {
       if (!voiceState.connected || voiceState.channelId !== channel.id) {
         // Conecta no canal de voz WebRTC
-        webrtcVoice.join(channel.id, currentUser, (participants) => {
+        voice.join(channel.id, currentUser, (participants) => {
           setVoiceState((prev) => ({ ...prev, participants }));
         });
 
@@ -482,7 +504,6 @@ export function App() {
           serverName: currentServer?.name,
           muted: voiceState.muted,
           deafened: voiceState.deafened,
-          screenShare: false,
           pingMs: Math.floor(Math.random() * 8) + 12,
           participants: [
             {
@@ -492,6 +513,7 @@ export function App() {
               speaking: false,
               muted: voiceState.muted,
               deafened: voiceState.deafened,
+              streaming: false,
             },
           ],
         });
@@ -584,7 +606,7 @@ export function App() {
   const handleToggleMute = () => {
     const newMuted = !voiceState.muted;
     setVoiceState((prev) => ({ ...prev, muted: newMuted }));
-    webrtcVoice.setMuted(newMuted);
+    voice.setMuted(newMuted);
   };
 
   const handleToggleDeafen = () => {
@@ -599,8 +621,8 @@ export function App() {
       deafened: newDeafened,
       muted: newMuted,
     }));
-    webrtcVoice.setDeafened(newDeafened);
-    webrtcVoice.setMuted(newMuted);
+    voice.setDeafened(newDeafened);
+    voice.setMuted(newMuted);
   };
 
   // Status de presença: aplica na hora e desfaz se o servidor recusar
@@ -693,6 +715,7 @@ export function App() {
             onSelectChannel={handleSelectChannel}
             currentUser={currentUser}
             voiceState={voiceState}
+            voiceRosters={voiceRosters}
             onToggleMute={handleToggleMute}
             onToggleDeafen={handleToggleDeafen}
             onDisconnectVoice={leaveVoice}
@@ -717,6 +740,7 @@ export function App() {
             channelName={voiceState.channelName || 'Canal de Voz'}
             voiceState={voiceState}
             participants={voiceState.participants}
+            currentUserId={currentUser.id}
             onToggleMute={handleToggleMute}
             onToggleDeafen={handleToggleDeafen}
             onDisconnect={leaveVoice}
