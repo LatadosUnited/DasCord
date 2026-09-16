@@ -22,10 +22,10 @@ import {
 import type { User, VoiceParticipant } from '../types';
 import * as signal from './voiceSignaling';
 import { InputStatusStore } from './microphone';
-import type { ParticipantsListener, ScreenShareSnapshot } from './voiceTypes';
+import { ParticipantRoster } from './voiceParticipants';
+import { ScreenShareState } from './screenShareState';
+import type { ParticipantsListener } from './voiceTypes';
 import type { VoiceCredentials } from './voice';
-
-const EMPTY_SCREEN_SNAPSHOT: ScreenShareSnapshot = { local: null, viewerCount: 0, watching: [], remote: {} };
 
 /** Avatar vai no metadata do token, gerado pelo servidor Rust */
 function avatarOf(participant: Participant): string {
@@ -44,8 +44,7 @@ class SfuVoiceService {
   private isDeafened = false;
   private isSpeaking = false;
 
-  private participants: Map<string, VoiceParticipant> = new Map();
-  private participantsListeners: Set<ParticipantsListener> = new Set();
+  private roster = new ParticipantRoster();
   /** O LiveKit não transmite "ensurdecido"; isso chega pelo nosso WebSocket */
   private remoteDeafened: Map<string, boolean> = new Map();
   private audioElements: Map<string, HTMLMediaElement> = new Map();
@@ -55,11 +54,7 @@ class SfuVoiceService {
   private joinGeneration = 0;
 
   // Transmissão de tela
-  private localScreen: MediaStream | null = null;
-  private watching: Set<string> = new Set();
-  private remoteScreens: Map<string, MediaStream> = new Map();
-  private screenSnapshot: ScreenShareSnapshot = EMPTY_SCREEN_SNAPSHOT;
-  private screenListeners: Set<() => void> = new Set();
+  private screen = new ScreenShareState();
 
   private input = new InputStatusStore();
 
@@ -74,8 +69,7 @@ class SfuVoiceService {
 
     this.currentChannelId = channelId;
     this.currentUser = user;
-    this.participantsListeners.clear();
-    this.participantsListeners.add(onParticipantsUpdate);
+    this.roster.listen(onParticipantsUpdate);
 
     const settings = getVoiceSettings();
     const room = new Room({
@@ -135,16 +129,14 @@ class SfuVoiceService {
     this.settingsUnsub?.();
     this.settingsUnsub = null;
 
-    this.participants.clear();
+    this.roster.clear();
     this.remoteDeafened.clear();
-    this.localScreen = null;
-    this.watching.clear();
-    this.remoteScreens.clear();
+    this.screen.clear();
     this.isSpeaking = false;
     this.input.set('ok');
-    this.notifyParticipants();
-    this.notifyScreen();
-    this.participantsListeners.clear();
+    this.roster.notify();
+    this.screen.notify();
+    this.roster.clearListeners();
     this.currentChannelId = null;
     this.currentUser = null;
   }
@@ -218,7 +210,7 @@ class SfuVoiceService {
   // ---------- Transmissão de tela ----------
 
   async startScreenShare(): Promise<string | null> {
-    if (!this.room || this.localScreen) return null;
+    if (!this.room || this.screen.sharing) return null;
     const preset = screenQualityPreset(getVoiceSettings().screenQuality);
 
     let publication: LocalTrackPublication | undefined;
@@ -241,57 +233,52 @@ class SfuVoiceService {
 
     const track = publication?.track;
     if (!track) return null;
-    this.localScreen = track.mediaStream ?? new MediaStream([track.mediaStreamTrack]);
+    this.screen.setLocal(track.mediaStream ?? new MediaStream([track.mediaStreamTrack]));
     // Botão "Parar de compartilhar" do próprio sistema
     track.mediaStreamTrack.addEventListener('ended', () => this.stopScreenShare());
 
     this.sendScreenEvent('screen-start');
     this.syncParticipants();
-    this.notifyScreen();
+    this.screen.notify();
     return null;
   }
 
   stopScreenShare() {
-    if (!this.room || !this.localScreen) return;
+    if (!this.room || !this.screen.sharing) return;
     this.room.localParticipant.setScreenShareEnabled(false).catch((err) => {
       console.warn('Não foi possível parar a transmissão:', err);
     });
-    this.localScreen = null;
+    this.screen.setLocal(null);
     this.sendScreenEvent('screen-stop');
     this.syncParticipants();
-    this.notifyScreen();
+    this.screen.notify();
   }
 
   /** No SFU, assistir é se inscrever na faixa de vídeo de quem transmite */
   watchScreen(peerId: string) {
-    if (this.watching.has(peerId)) return;
+    if (this.screen.isWatching(peerId)) return;
     const publication = this.screenPublication(peerId);
     if (!publication) return;
 
-    this.watching.add(peerId);
+    this.screen.startWatching(peerId);
     publication.setSubscribed(true);
-    this.notifyScreen();
+    this.screen.notify();
   }
 
   stopWatchingScreen(peerId: string) {
-    if (!this.watching.delete(peerId)) return;
+    if (!this.screen.isWatching(peerId)) return;
+    this.screen.forget(peerId);
     this.screenPublication(peerId)?.setSubscribed(false);
-    this.remoteScreens.delete(peerId);
-    this.notifyScreen();
+    this.screen.notify();
   }
 
   private screenPublication(identity: string): RemoteTrackPublication | undefined {
     return this.room?.remoteParticipants.get(identity)?.getTrackPublication(Track.Source.ScreenShare);
   }
 
-  subscribeScreenShare = (cb: () => void) => {
-    this.screenListeners.add(cb);
-    return () => {
-      this.screenListeners.delete(cb);
-    };
-  };
+  subscribeScreenShare = this.screen.subscribe;
 
-  getScreenShareSnapshot = (): ScreenShareSnapshot => this.screenSnapshot;
+  getScreenShareSnapshot = this.screen.getSnapshot;
 
   // ---------- Eventos da sala ----------
 
@@ -304,23 +291,23 @@ class SfuVoiceService {
         if (track.kind === Track.Kind.Audio) {
           this.attachAudio(participant.identity, track);
         } else if (publication.source === Track.Source.ScreenShare) {
-          if (!this.watching.has(participant.identity)) {
+          if (!this.screen.isWatching(participant.identity)) {
             // Ninguém pediu para assistir: não gasta banda com o vídeo
             publication.setSubscribed(false);
             return;
           }
-          this.remoteScreens.set(participant.identity, track.mediaStream ?? new MediaStream([track.mediaStreamTrack]));
-          this.notifyScreen();
+          this.screen.setRemote(participant.identity, track.mediaStream ?? new MediaStream([track.mediaStreamTrack]));
+          this.screen.notify();
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         track.detach().forEach((el) => el.remove());
         this.audioElements.delete(participant.identity);
-        if (this.remoteScreens.delete(participant.identity)) this.notifyScreen();
+        if (this.screen.dropRemote(participant.identity)) this.screen.notify();
       })
       .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         // Telas só são baixadas sob pedido
-        if (publication.source === Track.Source.ScreenShare && !this.watching.has(participant.identity)) {
+        if (publication.source === Track.Source.ScreenShare && !this.screen.isWatching(participant.identity)) {
           publication.setSubscribed(false);
         }
         this.syncParticipants();
@@ -329,12 +316,11 @@ class SfuVoiceService {
       .on(RoomEvent.ParticipantConnected, () => this.syncParticipants())
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         this.remoteDeafened.delete(participant.identity);
-        this.watching.delete(participant.identity);
-        this.remoteScreens.delete(participant.identity);
+        this.screen.forget(participant.identity);
         this.audioElements.get(participant.identity)?.remove();
         this.audioElements.delete(participant.identity);
         this.syncParticipants();
-        this.notifyScreen();
+        this.screen.notify();
       })
       .on(RoomEvent.TrackMuted, () => this.syncParticipants())
       .on(RoomEvent.TrackUnmuted, () => this.syncParticipants())
@@ -357,10 +343,7 @@ class SfuVoiceService {
 
   private handleSpeakers(speakers: Participant[]) {
     const speaking = new Set(speakers.map((s) => s.identity));
-    this.participants.forEach((participant, id) => {
-      participant.speaking = speaking.has(id);
-    });
-    this.notifyParticipants();
+    this.roster.setSpeaking(speaking);
 
     // Quem está fora da chamada vê o indicador pela lista do canal
     const me = this.currentUser?.id;
@@ -384,10 +367,10 @@ class SfuVoiceService {
       id: user.id,
       name: user.name,
       avatar: user.avatar,
-      speaking: this.participants.get(user.id)?.speaking ?? false,
+      speaking: this.roster.isSpeaking(user.id),
       muted: this.isMuted,
       deafened: this.isDeafened,
-      streaming: this.localScreen !== null,
+      streaming: this.screen.sharing,
     });
 
     room.remoteParticipants.forEach((participant) => {
@@ -396,7 +379,7 @@ class SfuVoiceService {
         id: participant.identity,
         name: participant.name || participant.identity,
         avatar: avatarOf(participant),
-        speaking: this.participants.get(participant.identity)?.speaking ?? false,
+        speaking: this.roster.isSpeaking(participant.identity),
         // Sem microfone publicado, a pessoa está ouvindo apenas
         muted: microphone?.isMuted ?? true,
         deafened: this.remoteDeafened.get(participant.identity) ?? false,
@@ -405,8 +388,7 @@ class SfuVoiceService {
       });
     });
 
-    this.participants = next;
-    this.notifyParticipants();
+    this.roster.replace(Array.from(next.values()));
   }
 
   // ---------- Avisos pelo WebSocket do servidor Rust ----------
@@ -417,11 +399,7 @@ class SfuVoiceService {
     if (!userId || userId === this.currentUser?.id) return;
 
     this.remoteDeafened.set(userId, !!deafened);
-    const participant = this.participants.get(userId);
-    if (participant) {
-      participant.deafened = !!deafened;
-      this.notifyParticipants();
-    }
+    this.roster.patch(userId, { deafened: !!deafened });
   }
 
   private sendJoin() {
@@ -429,7 +407,7 @@ class SfuVoiceService {
     signal.sendJoin(this.currentChannelId, this.currentUser, {
       muted: this.isMuted,
       deafened: this.isDeafened,
-      streaming: this.localScreen !== null,
+      streaming: this.screen.sharing,
     });
   }
 
@@ -455,21 +433,6 @@ class SfuVoiceService {
 
   getInputStatus = this.input.get;
 
-  private notifyParticipants() {
-    const list = Array.from(this.participants.values(), (p) => ({ ...p }));
-    this.participantsListeners.forEach((cb) => cb(list));
-  }
-
-  private notifyScreen() {
-    this.screenSnapshot = {
-      local: this.localScreen,
-      // O SFU não informa quantas pessoas estão assistindo
-      viewerCount: 0,
-      watching: Array.from(this.watching),
-      remote: Object.fromEntries(this.remoteScreens),
-    };
-    this.screenListeners.forEach((cb) => cb());
-  }
 }
 
 export const sfuVoice = new SfuVoiceService();

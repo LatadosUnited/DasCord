@@ -8,27 +8,18 @@ import {
   ScreenQualityPreset,
   subscribeVoiceSettings,
 } from './voiceSettings';
-import { PeerConnectionStatus, User, VoiceParticipant } from '../types';
+import { PeerConnectionStatus, User } from '../types';
 import { InputStatusStore, inputDeviceExists, openMicrophone } from './microphone';
+import { ParticipantRoster } from './voiceParticipants';
+import { ScreenShareState } from './screenShareState';
 import { applySenderQuality, applyTrackQuality, captureScreen } from './screenCapture';
+import { IceRecovery } from './iceRestart';
 import { SpeakingDetector, startSpeakingDetector } from './vad';
-import {
-  EMPTY_SCREEN_SNAPSHOT,
-  InputStatus,
-  ParticipantsListener,
-  ScreenShareSnapshot,
-} from './voiceTypes';
+import { InputStatus, ParticipantsListener } from './voiceTypes';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: ICE_SERVERS,
 };
-
-/** "disconnected" costuma voltar sozinho (troca de rede rápida); só reinicia o ICE depois disso */
-const ICE_DISCONNECT_GRACE_MS = 4000;
-/** O lado educado espera mais, para os dois não reiniciarem ao mesmo tempo */
-const ICE_POLITE_EXTRA_DELAY_MS = 2500;
-const ICE_RESTART_RETRY_MS = 10000;
-const MAX_ICE_RESTARTS = 5;
 
 /** Conexão com um participante, negociada no padrão "perfect negotiation" */
 interface PeerLink {
@@ -40,9 +31,8 @@ interface PeerLink {
   audio: HTMLAudioElement | null;
   /** Leva a nossa tela a este participante; reaproveitado entre assistir e parar */
   screenTransceiver: RTCRtpTransceiver | null;
-  /** Próxima tentativa de reiniciar o ICE, se a conexão caiu */
-  restartTimer: ReturnType<typeof setTimeout> | null;
-  restartAttempts: number;
+  /** Traz a conexão de volta quando ela cai */
+  recovery: IceRecovery;
 }
 
 class WebRTCVoiceService {
@@ -55,8 +45,10 @@ class WebRTCVoiceService {
   private isDeafened = false;
 
   private peers: Map<string, PeerLink> = new Map();
-  private participants: Map<string, VoiceParticipant> = new Map();
-  private participantsListeners: Set<ParticipantsListener> = new Set();
+  private roster = new ParticipantRoster((p) => ({
+    ...p,
+    connection: p.id === this.currentUser?.id ? undefined : this.peerStates.get(p.id) ?? 'connecting',
+  }));
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   private socketUnsub: (() => void) | null = null;
   private statusUnsub: (() => void) | null = null;
@@ -68,12 +60,7 @@ class WebRTCVoiceService {
   private joinGeneration = 0;
 
   // Transmissão de tela
-  private screenStream: MediaStream | null = null;
-  private screenWatchers: Set<string> = new Set();
-  private watching: Set<string> = new Set();
-  private remoteScreens: Map<string, MediaStream> = new Map();
-  private screenSnapshot: ScreenShareSnapshot = EMPTY_SCREEN_SNAPSHOT;
-  private screenListeners: Set<() => void> = new Set();
+  private screen = new ScreenShareState();
 
   private appliedInputDeviceId = getVoiceSettings().inputDeviceId;
   private appliedOutputDeviceId = getVoiceSettings().outputDeviceId;
@@ -113,7 +100,7 @@ class WebRTCVoiceService {
 
     if (screenQuality !== this.appliedScreenQuality) {
       this.appliedScreenQuality = screenQuality;
-      if (this.screenStream) {
+      if (this.screen.sharing) {
         this.applyScreenQuality(screenQualityPreset(screenQuality));
       }
     }
@@ -245,11 +232,10 @@ class WebRTCVoiceService {
     this.currentUser = user;
 
     // Evita vazamento de memória limpando listeners anteriores
-    this.participantsListeners.clear();
-    this.participantsListeners.add(onParticipantsUpdate);
+    this.roster.listen(onParticipantsUpdate);
 
     // Adiciona o usuário local na lista de participantes
-    this.participants.set(user.id, {
+    this.roster.upsert({
       id: user.id,
       name: user.name,
       avatar: user.avatar,
@@ -258,7 +244,6 @@ class WebRTCVoiceService {
       deafened: this.isDeafened,
       streaming: false,
     });
-    this.notifyParticipants();
 
     // Captura o microfone do usuário; sem ele, entra só ouvindo
     const stream = await openMicrophone(getVoiceSettings().inputDeviceId);
@@ -304,7 +289,7 @@ class WebRTCVoiceService {
 
   /** Como os outros nos veem agora */
   private presence() {
-    return { muted: this.isMuted, deafened: this.isDeafened, streaming: !!this.screenStream };
+    return { muted: this.isMuted, deafened: this.isDeafened, streaming: this.screen.sharing };
   }
 
   /** Mostra para o servidor inteiro se estamos mutados ou ensurdecidos */
@@ -329,11 +314,8 @@ class WebRTCVoiceService {
     this.teardownVAD();
 
     // voice-leave já avisa quem estava assistindo
-    this.screenStream?.getTracks().forEach((track) => track.stop());
-    this.screenStream = null;
-    this.screenWatchers.clear();
-    this.watching.clear();
-    this.remoteScreens.clear();
+    this.screen.local?.getTracks().forEach((track) => track.stop());
+    this.screen.clear();
 
     // Fecha conexões P2P e remove elementos de áudio
     this.peers.forEach((link) => this.closeLink(link));
@@ -348,12 +330,12 @@ class WebRTCVoiceService {
     this.statusUnsub = null;
     this.signalingChain = Promise.resolve();
 
-    this.participants.clear();
+    this.roster.clear();
     this.peerStates.clear();
     this.input.set('ok');
-    this.notifyParticipants();
-    this.notifyScreen();
-    this.participantsListeners.clear();
+    this.roster.notify();
+    this.screen.notify();
+    this.roster.clearListeners();
     this.currentChannelId = null;
     this.currentUser = null;
   }
@@ -366,12 +348,7 @@ class WebRTCVoiceService {
       });
     }
     if (this.currentUser) {
-      const me = this.participants.get(this.currentUser.id);
-      if (me) {
-        me.muted = muted;
-        if (muted) me.speaking = false;
-        this.notifyParticipants();
-      }
+      this.roster.patch(this.currentUser.id, muted ? { muted, speaking: false } : { muted });
       this.broadcastSpeaking(false);
       this.broadcastVoiceState();
     }
@@ -383,11 +360,7 @@ class WebRTCVoiceService {
       if (link.audio) link.audio.muted = deafened;
     });
     if (this.currentUser) {
-      const me = this.participants.get(this.currentUser.id);
-      if (me) {
-        me.deafened = deafened;
-        this.notifyParticipants();
-      }
+      this.roster.patch(this.currentUser.id, { deafened });
       this.broadcastVoiceState();
     }
   }
@@ -396,7 +369,7 @@ class WebRTCVoiceService {
 
   /** Abre o seletor de tela e começa a transmitir. Devolve uma mensagem de erro, ou null. */
   async startScreenShare(): Promise<string | null> {
-    if (!this.currentChannelId || !this.currentUser || this.screenStream) return null;
+    if (!this.currentChannelId || !this.currentUser || this.screen.sharing) return null;
 
     const generation = this.joinGeneration;
     const preset = screenQualityPreset(getVoiceSettings().screenQuality);
@@ -405,17 +378,17 @@ class WebRTCVoiceService {
     const stream = capture.stream;
 
     // Saiu do canal (ou já começou outra transmissão) enquanto o seletor estava aberto
-    if (generation !== this.joinGeneration || this.screenStream) {
+    if (generation !== this.joinGeneration || this.screen.sharing) {
       stream.getTracks().forEach((track) => track.stop());
       return null;
     }
 
     // Botão "Parar de compartilhar" do próprio sistema
     stream.getVideoTracks()[0].addEventListener('ended', () => {
-      if (this.screenStream === stream) this.stopScreenShare();
+      if (this.screen.local === stream) this.stopScreenShare();
     });
 
-    this.screenStream = stream;
+    this.screen.setLocal(stream);
     this.appliedScreenQuality = preset.id;
     this.setLocalStreaming(true);
     signal.sendScreenStart(this.currentChannelId, this.currentUser.id);
@@ -423,12 +396,13 @@ class WebRTCVoiceService {
   }
 
   stopScreenShare() {
-    if (!this.screenStream) return;
+    const stream = this.screen.local;
+    if (!stream) return;
 
-    this.screenWatchers.forEach((peerId) => this.detachScreen(peerId));
-    this.screenWatchers.clear();
-    this.screenStream.getTracks().forEach((track) => track.stop());
-    this.screenStream = null;
+    this.screen.watcherIds().forEach((peerId) => this.detachScreen(peerId));
+    this.screen.clearWatchers();
+    stream.getTracks().forEach((track) => track.stop());
+    this.screen.setLocal(null);
     this.setLocalStreaming(false);
 
     if (this.currentChannelId && this.currentUser) {
@@ -438,16 +412,16 @@ class WebRTCVoiceService {
 
   /** Pede a quem está transmitindo para começar a enviar a tela para nós */
   watchScreen(peerId: string) {
-    if (!this.currentChannelId || !this.currentUser || this.watching.has(peerId)) return;
-    if (!this.participants.get(peerId)?.streaming) return;
+    if (!this.currentChannelId || !this.currentUser || this.screen.isWatching(peerId)) return;
+    if (!this.roster.isStreaming(peerId)) return;
 
-    this.watching.add(peerId);
-    this.notifyScreen();
+    this.screen.startWatching(peerId);
+    this.screen.notify();
     signal.sendWatchScreen(this.currentChannelId, this.currentUser.id, peerId);
   }
 
   stopWatchingScreen(peerId: string) {
-    if (!this.watching.has(peerId)) return;
+    if (!this.screen.isWatching(peerId)) return;
 
     this.forgetWatching(peerId);
     if (this.currentChannelId && this.currentUser) {
@@ -455,33 +429,24 @@ class WebRTCVoiceService {
     }
   }
 
-  subscribeScreenShare = (cb: () => void) => {
-    this.screenListeners.add(cb);
-    return () => {
-      this.screenListeners.delete(cb);
-    };
-  };
+  subscribeScreenShare = this.screen.subscribe;
 
-  getScreenShareSnapshot = (): ScreenShareSnapshot => this.screenSnapshot;
+  getScreenShareSnapshot = this.screen.getSnapshot;
 
   private setLocalStreaming(streaming: boolean) {
-    if (this.currentUser) {
-      const me = this.participants.get(this.currentUser.id);
-      if (me) me.streaming = streaming;
-    }
-    this.notifyParticipants();
-    this.notifyScreen();
+    this.roster.patch(this.currentUser?.id, { streaming });
+    this.roster.notify();
+    this.screen.notify();
   }
 
   private forgetWatching(peerId: string) {
-    this.watching.delete(peerId);
-    this.remoteScreens.delete(peerId);
-    this.notifyScreen();
+    this.screen.forget(peerId);
+    this.screen.notify();
   }
 
   private attachScreen(peerId: string) {
     const link = this.peers.get(peerId);
-    const stream = this.screenStream;
+    const stream = this.screen.local;
     const track = stream?.getVideoTracks()[0];
     if (!link || !stream || !track || link.pc.signalingState === 'closed') return;
 
@@ -513,11 +478,11 @@ class WebRTCVoiceService {
   }
 
   private applyScreenQuality(preset: ScreenQualityPreset) {
-    const track = this.screenStream?.getVideoTracks()[0];
+    const track = this.screen.local?.getVideoTracks()[0];
     if (!track) return;
 
     applyTrackQuality(track, preset);
-    this.screenWatchers.forEach((peerId) => {
+    this.screen.watcherIds().forEach((peerId) => {
       const sender = this.peers.get(peerId)?.screenTransceiver?.sender;
       if (sender) applySenderQuality(sender, preset);
     });
@@ -541,11 +506,7 @@ class WebRTCVoiceService {
   /** Mostra na nossa lista e conta para os outros participantes */
   private applySpeaking(speaking: boolean) {
     if (!this.currentUser) return;
-    const me = this.participants.get(this.currentUser.id);
-    if (me) {
-      me.speaking = speaking;
-      this.notifyParticipants();
-    }
+    this.roster.patch(this.currentUser.id, { speaking });
     this.broadcastSpeaking(speaking);
   }
 
@@ -583,7 +544,7 @@ class WebRTCVoiceService {
         if (data.userId === me) return;
 
         // Novo participante entrou
-        this.participants.set(data.userId, {
+        this.roster.upsert({
           id: data.userId,
           name: data.name,
           avatar: data.avatar,
@@ -592,7 +553,6 @@ class WebRTCVoiceService {
           deafened: !!data.deafened,
           streaming: !!data.streaming,
         });
-        this.notifyParticipants();
 
         // Envia confirmação de presença (anúncio) de volta para o recém-chegado saber quem já está no canal
         signal.sendAnnounce(event.channelId, data.userId, this.currentUser, this.presence());
@@ -605,7 +565,7 @@ class WebRTCVoiceService {
       case 'voice-announce': {
         // Usuário recém-chegado recebe os dados dos usuários que já estavam no canal
         if (data.to === me && data.user) {
-          this.participants.set(data.user.id, {
+          this.roster.upsert({
             id: data.user.id,
             name: data.user.name,
             avatar: data.user.avatar,
@@ -614,7 +574,6 @@ class WebRTCVoiceService {
             deafened: !!data.user.deafened,
             streaming: !!data.user.streaming,
           });
-          this.notifyParticipants();
         }
         break;
       }
@@ -628,21 +587,12 @@ class WebRTCVoiceService {
 
       case 'voice-state': {
         if (data.userId === me) return;
-        const participant = this.participants.get(data.userId);
-        if (participant) {
-          participant.muted = !!data.muted;
-          participant.deafened = !!data.deafened;
-          this.notifyParticipants();
-        }
+        this.roster.patch(data.userId, { muted: !!data.muted, deafened: !!data.deafened });
         break;
       }
 
       case 'voice-speaking': {
-        const participant = this.participants.get(data.userId);
-        if (participant) {
-          participant.speaking = data.speaking;
-          this.notifyParticipants();
-        }
+        this.roster.patch(data.userId, { speaking: data.speaking });
         break;
       }
 
@@ -696,11 +646,7 @@ class WebRTCVoiceService {
       case 'screen-start':
       case 'screen-stop': {
         if (data.userId === me) return;
-        const participant = this.participants.get(data.userId);
-        if (participant) {
-          participant.streaming = type === 'screen-start';
-          this.notifyParticipants();
-        }
+        this.roster.patch(data.userId, { streaming: type === 'screen-start' });
         if (type === 'screen-stop') {
           this.forgetWatching(data.userId);
         }
@@ -708,17 +654,17 @@ class WebRTCVoiceService {
       }
 
       case 'screen-watch': {
-        if (data.to !== me || !this.screenStream || !this.peers.has(data.from)) return;
-        this.screenWatchers.add(data.from);
+        if (data.to !== me || !this.screen.sharing || !this.peers.has(data.from)) return;
+        this.screen.addWatcher(data.from);
         this.attachScreen(data.from);
-        this.notifyScreen();
+        this.screen.notify();
         break;
       }
 
       case 'screen-unwatch': {
-        if (data.to !== me || !this.screenWatchers.delete(data.from)) return;
+        if (data.to !== me || !this.screen.removeWatcher(data.from)) return;
         this.detachScreen(data.from);
-        this.notifyScreen();
+        this.screen.notify();
         break;
       }
     }
@@ -737,8 +683,11 @@ class WebRTCVoiceService {
       ignoreOffer: false,
       audio: null,
       screenTransceiver: null,
-      restartTimer: null,
-      restartAttempts: 0,
+      recovery: new IceRecovery(pc, peerId, {
+        polite: this.currentUser!.id < peerId,
+        isCurrent: () => this.peers.get(peerId) === link,
+        onState: (state) => this.setPeerState(peerId, state),
+      }),
     };
     this.peers.set(peerId, link);
     this.peerStates.set(peerId, 'connecting');
@@ -758,9 +707,9 @@ class WebRTCVoiceService {
 
       if (event.track.kind === 'video') {
         // Só a tela de quem escolhemos assistir
-        if (this.watching.has(peerId)) {
-          this.remoteScreens.set(peerId, stream);
-          this.notifyScreen();
+        if (this.screen.isWatching(peerId)) {
+          this.screen.setRemote(peerId, stream);
+          this.screen.notify();
         }
         return;
       }
@@ -777,7 +726,7 @@ class WebRTCVoiceService {
     };
 
     // Queda de rede: reinicia o ICE em vez de deixar o participante mudo para sempre
-    pc.onconnectionstatechange = () => this.handleConnectionState(peerId, link);
+    pc.onconnectionstatechange = () => link.recovery.handleConnectionState();
 
     // Candidatos ICE
     pc.onicecandidate = (event) => {
@@ -804,68 +753,16 @@ class WebRTCVoiceService {
     return link;
   }
 
-  // ---------- Recuperação da conexão ----------
-
-  private handleConnectionState(peerId: string, link: PeerLink) {
-    if (this.peers.get(peerId) !== link) return;
-
-    switch (link.pc.connectionState) {
-      case 'connected':
-        link.restartAttempts = 0;
-        this.clearRestartTimer(link);
-        this.setPeerState(peerId, 'connected');
-        break;
-      case 'disconnected':
-      case 'failed': {
-        const failed = link.pc.connectionState === 'failed';
-        if (link.restartAttempts >= MAX_ICE_RESTARTS) {
-          this.setPeerState(peerId, 'failed');
-          break;
-        }
-        this.setPeerState(peerId, 'reconnecting');
-        const delay = (failed ? 0 : ICE_DISCONNECT_GRACE_MS) + (link.polite ? ICE_POLITE_EXTRA_DELAY_MS : 0);
-        this.scheduleIceRestart(peerId, link, delay);
-        break;
-      }
-    }
-  }
-
-  private scheduleIceRestart(peerId: string, link: PeerLink, delayMs: number) {
-    if (link.restartTimer) return;
-    link.restartTimer = setTimeout(() => {
-      link.restartTimer = null;
-      if (this.peers.get(peerId) !== link) return;
-      const state = link.pc.connectionState;
-      if (state !== 'disconnected' && state !== 'failed') return;
-
-      if (link.restartAttempts >= MAX_ICE_RESTARTS) {
-        console.warn(`Conexão de voz com ${peerId} não voltou após ${MAX_ICE_RESTARTS} tentativas.`);
-        this.setPeerState(peerId, 'failed');
-        return;
-      }
-      link.restartAttempts++;
-      // Gera uma nova oferta com credenciais ICE novas (onnegotiationneeded)
-      link.pc.restartIce();
-      // Se continuar sem conexão, o estado pode não mudar mais: confere de novo depois
-      this.scheduleIceRestart(peerId, link, ICE_RESTART_RETRY_MS);
-    }, delayMs);
-  }
-
-  private clearRestartTimer(link: PeerLink) {
-    if (link.restartTimer) {
-      clearTimeout(link.restartTimer);
-      link.restartTimer = null;
-    }
-  }
+  // ---------- Estado da conexão com cada participante ----------
 
   private setPeerState(peerId: string, state: PeerConnectionStatus) {
     if (this.peerStates.get(peerId) === state) return;
     this.peerStates.set(peerId, state);
-    this.notifyParticipants();
+    this.roster.notify();
   }
 
   private closeLink(link: PeerLink) {
-    this.clearRestartTimer(link);
+    link.recovery.cancel();
     link.pc.close();
     if (link.audio) {
       link.audio.pause();
@@ -879,35 +776,13 @@ class WebRTCVoiceService {
       this.closeLink(link);
       this.peers.delete(peerId);
     }
-    this.participants.delete(peerId);
     this.peerStates.delete(peerId);
     this.pendingCandidates.delete(peerId);
-    this.screenWatchers.delete(peerId);
-    this.watching.delete(peerId);
-    this.remoteScreens.delete(peerId);
-    this.notifyParticipants();
-    this.notifyScreen();
+    this.screen.removePeer(peerId);
+    this.roster.remove(peerId);
+    this.screen.notify();
   }
 
-  private notifyParticipants() {
-    // Cópias: o React compara por referência
-    const me = this.currentUser?.id;
-    const list = Array.from(this.participants.values(), (p) => ({
-      ...p,
-      connection: p.id === me ? undefined : this.peerStates.get(p.id) ?? 'connecting',
-    }));
-    this.participantsListeners.forEach((cb) => cb(list));
-  }
-
-  private notifyScreen() {
-    this.screenSnapshot = {
-      local: this.screenStream,
-      viewerCount: this.screenWatchers.size,
-      watching: Array.from(this.watching),
-      remote: Object.fromEntries(this.remoteScreens),
-    };
-    this.screenListeners.forEach((cb) => cb());
-  }
 }
 
 export const webrtcVoice = new WebRTCVoiceService();
