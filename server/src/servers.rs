@@ -338,6 +338,21 @@ impl ServerStore {
         member_ids_of(&conn, server_id).map_err(internal_error).unwrap_or_default()
     }
 
+    pub fn is_member(&self, server_id: &str, user_id: &str) -> bool {
+        let conn = self.db.conn();
+        is_member(&conn, server_id, user_id).unwrap_or(false)
+    }
+
+    /// Servidor dono do canal, ou None se o canal não existe (ou é uma DM)
+    pub fn channel_server_id(&self, channel_id: &str) -> Option<String> {
+        let conn = self.db.conn();
+        conn.query_row("SELECT server_id FROM channels WHERE id = ?1", [channel_id], |r| r.get(0))
+            .optional()
+            .map_err(internal_error)
+            .ok()
+            .flatten()
+    }
+
     /// Membros do servidor dono do canal, ou None se o canal não existe
     pub fn channel_member_ids(&self, channel_id: &str) -> Option<Vec<String>> {
         let conn = self.db.conn();

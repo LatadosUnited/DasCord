@@ -275,6 +275,19 @@
   line-height: 1.4;
 }
 
+/* Selo de transmissão de tela ao vivo */
+.live-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background-color: var(--danger);
+  color: var(--text-on-color);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
 /* ---------- Modal ---------- */
 
 .modal-overlay {

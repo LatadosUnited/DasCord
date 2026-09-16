@@ -1,0 +1,20 @@
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  # Uma única porta UDP para toda a mídia, o que simplifica firewall e NAT
+  udp_port: 7882
+  # IP anunciado aos apps para a mídia. Dentro do Docker o servidor só enxerga o IP
+  # do container (ex: 172.x), que o app no Windows não alcança; 127.0.0.1 serve para
+  # desenvolvimento na mesma máquina.
+  # Fora da máquina local (VPS, rede externa): remova node_ip e use use_external_ip: true,
+  # para o servidor descobrir o IP público por STUN.
+  node_ip: 127.0.0.1
+  use_external_ip: false
+
+# Chaves de desenvolvimento. TROQUE antes de expor o servidor:
+# gere com  docker run --rm livekit/livekit-server generate-keys
+# e use os mesmos valores em LIVEKIT_API_KEY e LIVEKIT_API_SECRET do servidor Rust.
+keys:
+  devkey: dascord-dev-secret-troque-antes-de-expor

@@ -4,6 +4,7 @@ import { Channel, Server, SettingsTab, User, UserStatus, VoiceState } from '../t
 import { VoiceConnectionBar } from './VoiceConnectionBar';
 import { UserPanel } from './UserPanel';
 import { ServerMenu } from './servers/ServerMenu';
+import { VoiceRosters } from '../services/voiceRoster';
 import './sidebar.css';
 import './ChannelSidebar.css';
 
@@ -14,6 +15,8 @@ interface ChannelSidebarProps {
   onSelectChannel: (channel: Channel) => void;
   currentUser: User;
   voiceState: VoiceState;
+  /** Participantes de cada canal de voz, vistos de fora da chamada */
+  voiceRosters: VoiceRosters;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onDisconnectVoice: () => void;
@@ -31,6 +34,7 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
   onSelectChannel,
   currentUser,
   voiceState,
+  voiceRosters,
   onToggleMute,
   onToggleDeafen,
   onDisconnectVoice,
@@ -106,6 +110,13 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
               .map((channel) => {
                 const isActive = activeChannelId === channel.id;
                 const isVoiceActive = voiceState.connected && voiceState.channelId === channel.id;
+                // Dentro da chamada vale o estado local (fala sem atraso); fora, o que o servidor contou
+                const voiceParticipants =
+                  channel.type !== 'voice'
+                    ? []
+                    : isVoiceActive
+                      ? voiceState.participants
+                      : voiceRosters[channel.id] ?? [];
 
                 return (
                   <div key={channel.id}>
@@ -121,10 +132,22 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
                       <span className="channel-name">{channel.name}</span>
                     </div>
 
-                    {isVoiceActive && voiceState.participants.length > 0 && (
+                    {voiceParticipants.length > 0 && (
                       <div className="voice-channel-members">
-                        {voiceState.participants.map((p) => (
-                          <div key={p.id} className="voice-member-item">
+                        {voiceParticipants.map((p) => (
+                          <div
+                            key={p.id}
+                            className={`voice-member-item ${
+                              p.connection === 'reconnecting' || p.connection === 'failed' ? 'unstable' : ''
+                            }`}
+                            title={
+                              p.connection === 'reconnecting'
+                                ? 'Reconectando...'
+                                : p.connection === 'failed'
+                                  ? 'Sem conexão'
+                                  : undefined
+                            }
+                          >
                             <div className="voice-member-avatar-wrapper">
                               <img
                                 src={p.avatar}
@@ -133,6 +156,7 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
                               />
                             </div>
                             <span className="voice-member-name">{p.name}</span>
+                            {p.streaming && <span className="live-badge">AO VIVO</span>}
                             {p.muted && <MicOff size={12} className="voice-member-muted" />}
                           </div>
                         ))}

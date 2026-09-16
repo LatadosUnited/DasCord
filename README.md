@@ -20,6 +20,27 @@ npm run tauri dev
 
 As variáveis de ambiente estão documentadas em `.env.example`.
 
+## Voz: servidor de mídia (SFU)
+
+A voz funciona de dois jeitos:
+
+- **Com SFU (recomendado):** cada pessoa envia o áudio **uma vez** para o servidor de mídia, que repassa aos outros. É como o Discord funciona e é o que permite chamadas maiores.
+- **Sem SFU (reserva):** os apps se conectam direto uns aos outros (malha P2P). Cada pessoa envia uma cópia do áudio para **cada** participante, então a banda de subida cresce junto com a chamada.
+
+Para ligar o SFU:
+
+```bash
+# 1. Suba o LiveKit (portas 7880, 7881 e 7882/udp)
+docker compose -f livekit/docker-compose.yml up -d
+
+# 2. Aponte o servidor Rust para ele (veja .env.example)
+#    LIVEKIT_URL=ws://localhost:7880  LIVEKIT_API_KEY=devkey  LIVEKIT_API_SECRET=dascord-dev-secret-troque-antes-de-expor
+```
+
+O app pede um token temporário em `GET /api/voice/token?channelId=...`, e só recebe se tiver acesso ao canal. A chave secreta fica **só** no servidor Rust. Se esse endereço responder 503, o app volta sozinho para P2P.
+
+As chaves de `livekit/livekit.yaml` são de desenvolvimento: troque antes de expor o servidor.
+
 ## Versionamento
 
 O projeto segue [Semantic Versioning](https://semver.org/lang/pt-BR/): `MAIOR.MENOR.CORREÇÃO`.
