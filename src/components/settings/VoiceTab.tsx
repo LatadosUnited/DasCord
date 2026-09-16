@@ -28,6 +28,8 @@ export const VoiceTab: FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const frameRef = useRef<number | null>(null);
+  // Devolve a propria voz durante o teste, como no Discord
+  const monitorRef = useRef<HTMLAudioElement | null>(null);
 
   const refreshDevices = useCallback(() => {
     listAudioDevices().then(setDevices);
@@ -42,6 +44,11 @@ export const VoiceTab: FC = () => {
   const stopTest = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
+    if (monitorRef.current) {
+      monitorRef.current.pause();
+      monitorRef.current.srcObject = null;
+      monitorRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     contextRef.current?.close().catch(() => {});
@@ -64,6 +71,13 @@ export const VoiceTab: FC = () => {
 
         streamRef.current = stream;
         contextRef.current = context;
+
+        // Ouvir a propria voz e o que torna o teste util: da para julgar volume e ruido
+        const monitor = new Audio();
+        monitor.srcObject = stream;
+        applyOutputDevice(monitor, settings.outputDeviceId);
+        monitor.play().catch(() => {});
+        monitorRef.current = monitor;
         setTesting(true);
         refreshDevices(); // com a permissão concedida, os nomes aparecem
 
@@ -76,8 +90,13 @@ export const VoiceTab: FC = () => {
         setTestError('Não foi possível acessar o microfone. Verifique a permissão do sistema.');
       }
     },
-    [refreshDevices, stopTest]
+    [refreshDevices, stopTest, settings.outputDeviceId]
   );
+
+  // Trocar a saida durante o teste redireciona o retorno na hora
+  useEffect(() => {
+    if (monitorRef.current) applyOutputDevice(monitorRef.current, settings.outputDeviceId);
+  }, [settings.outputDeviceId]);
 
   // Encerra o teste ao sair da aba
   useEffect(() => stopTest, [stopTest]);
@@ -173,7 +192,8 @@ export const VoiceTab: FC = () => {
       <section className="settings-group">
         <h3 className="settings-group-title">Teste de microfone</h3>
         <p className="settings-help">
-          Fale algo: a barra mostra o volume captado. A marca indica a partir de onde sua voz é transmitida.
+          Fale algo: você vai se ouvir de volta e a barra mostra o volume captado. A marca indica a partir de
+          onde sua voz é transmitida. Se estiver sem fone, o som pode realimentar o microfone.
         </p>
         <div className="mic-test-row">
           <button
