@@ -13,10 +13,15 @@ import {
 } from 'livekit-client';
 import { realtimeSocket, SocketEvent } from './socket';
 import {
+  ANALYSER_FFT_SIZE,
   applyOutputDevice,
   audioInputOptions,
+  createLevelMeter,
+  createSpeechGate,
   getVoiceSettings,
+  LevelMeter,
   screenQualityPreset,
+  SpeechGate,
   subscribeVoiceSettings,
 } from './voiceSettings';
 import type { User, VoiceParticipant } from '../types';
@@ -54,6 +59,18 @@ class SfuVoiceService {
   private settingsUnsub: (() => void) | null = null;
   private joinGeneration = 0;
 
+  // Detecção de fala: o limiar de Configurações > Voz e Áudio vale aqui também
+  private audioContext: AudioContext | null = null;
+  private levelMeter: LevelMeter | null = null;
+  private speechGate: SpeechGate | null = null;
+  private vadInterval: any = null;
+  /** Quem já anunciou a própria fala pelo WebSocket; para esses, o limiar deles é que manda */
+  private speakingFromPeers: Set<string> = new Set();
+
+  // Só reage à troca de dispositivo, não a cada arrastada do controle de sensibilidade
+  private appliedInputDeviceId = getVoiceSettings().inputDeviceId;
+  private appliedOutputDeviceId = getVoiceSettings().outputDeviceId;
+
   // Transmissão de tela
   private localScreen: MediaStream | null = null;
   private watching: Set<string> = new Set();
@@ -79,6 +96,8 @@ class SfuVoiceService {
     this.participantsListeners.add(onParticipantsUpdate);
 
     const settings = getVoiceSettings();
+    this.appliedInputDeviceId = settings.inputDeviceId;
+    this.appliedOutputDeviceId = settings.outputDeviceId;
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
@@ -140,6 +159,8 @@ class SfuVoiceService {
     this.settingsUnsub?.();
     this.settingsUnsub = null;
 
+    this.teardownVAD();
+    this.speakingFromPeers.clear();
     this.participants.clear();
     this.remoteDeafened.clear();
     this.localScreen = null;
@@ -171,6 +192,7 @@ class SfuVoiceService {
     }
     if (this.isMuted) await this.microphonePublication()?.mute();
     this.setInputStatus('ok');
+    this.setupVAD();
     this.syncParticipants();
     return true;
   }
@@ -194,6 +216,7 @@ class SfuVoiceService {
       // Desmutar sem microfone publicado: tenta abrir de novo
       this.publishMicrophone();
     }
+    if (muted) this.setLocalSpeaking(false);
     if (this.room) {
       this.syncParticipants();
       this.broadcastVoiceState();
@@ -214,10 +237,21 @@ class SfuVoiceService {
   private handleSettingsChange() {
     if (!this.room) return;
     const { inputDeviceId, outputDeviceId } = getVoiceSettings();
-    this.room.switchActiveDevice('audioinput', inputDeviceId).catch((err) => {
-      console.warn('Não foi possível trocar o microfone:', err);
-    });
-    this.audioElements.forEach((el) => applyOutputDevice(el as HTMLAudioElement, outputDeviceId));
+
+    // O limiar de fala é lido a cada medição, então mudá-lo não precisa mexer em nada aqui
+    if (inputDeviceId !== this.appliedInputDeviceId) {
+      this.appliedInputDeviceId = inputDeviceId;
+      this.room
+        .switchActiveDevice('audioinput', inputDeviceId)
+        // O microfone virou outro: a medição precisa acompanhar
+        .then(() => this.setupVAD())
+        .catch((err) => console.warn('Não foi possível trocar o microfone:', err));
+    }
+
+    if (outputDeviceId !== this.appliedOutputDeviceId) {
+      this.appliedOutputDeviceId = outputDeviceId;
+      this.audioElements.forEach((el) => applyOutputDevice(el as HTMLAudioElement, outputDeviceId));
+    }
   }
 
   // ---------- Transmissão de tela ----------
@@ -338,13 +372,18 @@ class SfuVoiceService {
         this.remoteScreens.delete(participant.identity);
         this.audioElements.get(participant.identity)?.remove();
         this.audioElements.delete(participant.identity);
+        this.speakingFromPeers.delete(participant.identity);
         this.syncParticipants();
         this.notifyScreen();
       })
       .on(RoomEvent.TrackMuted, () => this.syncParticipants())
       .on(RoomEvent.TrackUnmuted, () => this.syncParticipants())
       .on(RoomEvent.TrackUnpublished, () => this.syncParticipants())
-      .on(RoomEvent.LocalTrackPublished, () => this.syncParticipants())
+      .on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
+        // Rede de segurança: se a faixa só ficou pronta depois do publish, mede agora
+        if (publication.source === Track.Source.Microphone && !this.vadInterval) this.setupVAD();
+        this.syncParticipants();
+      })
       .on(RoomEvent.LocalTrackUnpublished, () => this.syncParticipants())
       .on(RoomEvent.ParticipantMetadataChanged, () => this.syncParticipants())
       .on(RoomEvent.ParticipantNameChanged, () => this.syncParticipants())
@@ -360,20 +399,97 @@ class SfuVoiceService {
     this.audioElements.set(identity, element);
   }
 
+  // ---------- Detecção de fala ----------
+
+  /**
+   * Mede o microfone já publicado para aplicar a sensibilidade escolhida nas
+   * Configurações. O LiveKit tem detecção própria (`activeSpeakers`), mas com o
+   * limiar dele: sem isto, o controle de sensibilidade não valeria nada no SFU.
+   *
+   * O analisador é só uma derivação — não tem nada ligado na saída dele — então
+   * não concorre com o caminho de áudio do LiveKit.
+   */
+  private setupVAD() {
+    this.teardownVAD();
+    const track = this.microphonePublication()?.track?.mediaStreamTrack;
+    if (!track) return;
+
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const context: AudioContext = new AudioCtx();
+      // Em alguns navegadores o contexto nasce suspenso e a medição ficaria em zero
+      context.resume().catch(() => {});
+      const analyser = context.createAnalyser();
+      analyser.fftSize = ANALYSER_FFT_SIZE;
+      context.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+
+      this.audioContext = context;
+      this.levelMeter = createLevelMeter(analyser);
+      this.speechGate = createSpeechGate();
+      this.vadInterval = setInterval(() => this.tickVAD(), 50);
+    } catch (e) {
+      console.warn('Erro ao medir o microfone no SFU:', e);
+    }
+  }
+
+  private tickVAD() {
+    if (!this.levelMeter || !this.speechGate) return;
+    if (this.isMuted) {
+      this.levelMeter.reset();
+      this.speechGate.reset();
+      this.setLocalSpeaking(false);
+      return;
+    }
+    this.setLocalSpeaking(this.speechGate.update(this.levelMeter.read()));
+  }
+
+  private teardownVAD() {
+    if (this.vadInterval) {
+      clearInterval(this.vadInterval);
+      this.vadInterval = null;
+    }
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close().catch(() => {});
+    }
+    this.audioContext = null;
+    this.levelMeter = null;
+    this.speechGate = null;
+    this.isSpeaking = false;
+  }
+
+  private setLocalSpeaking(speaking: boolean) {
+    if (speaking === this.isSpeaking) return;
+    this.isSpeaking = speaking;
+
+    const me = this.currentUser?.id;
+    const participant = me ? this.participants.get(me) : undefined;
+    if (participant) {
+      participant.speaking = speaking;
+      this.notifyParticipants();
+    }
+    // Também alimenta a lista do canal, para quem não está na chamada
+    this.broadcastSpeaking(speaking);
+  }
+
+  /**
+   * Reserva para os participantes que ainda não anunciaram a própria fala: app
+   * antigo, ou quem acabou de entrar. Quem anuncia manda no próprio indicador,
+   * porque a sensibilidade é de quem fala, não de quem ouve.
+   */
   private handleSpeakers(speakers: Participant[]) {
     const speaking = new Set(speakers.map((s) => s.identity));
-    this.participants.forEach((participant, id) => {
-      participant.speaking = speaking.has(id);
-    });
-    this.notifyParticipants();
+    let changed = false;
 
-    // Quem está fora da chamada vê o indicador pela lista do canal
-    const me = this.currentUser?.id;
-    const meSpeaking = !!me && speaking.has(me);
-    if (meSpeaking !== this.isSpeaking) {
-      this.isSpeaking = meSpeaking;
-      this.broadcastSpeaking(meSpeaking);
-    }
+    this.participants.forEach((participant, id) => {
+      if (id === this.currentUser?.id || this.speakingFromPeers.has(id)) return;
+      const next = speaking.has(id);
+      if (participant.speaking !== next) {
+        participant.speaking = next;
+        changed = true;
+      }
+    });
+
+    if (changed) this.notifyParticipants();
   }
 
   /** Reconstrói a lista a partir do estado da sala: é a fonte da verdade */
@@ -417,9 +533,22 @@ class SfuVoiceService {
   // ---------- Avisos pelo WebSocket do servidor Rust ----------
 
   private handleSocketEvent(event: SocketEvent) {
-    if (event.channelId !== this.currentChannelId || event.type !== 'voice-state') return;
+    if (event.channelId !== this.currentChannelId) return;
     const { userId, deafened } = event.data ?? {};
     if (!userId || userId === this.currentUser?.id) return;
+
+    if (event.type === 'voice-speaking') {
+      // O servidor carimba o userId com quem enviou, então isto não dá para forjar
+      this.speakingFromPeers.add(userId);
+      const speaker = this.participants.get(userId);
+      if (speaker && speaker.speaking !== !!event.data?.speaking) {
+        speaker.speaking = !!event.data?.speaking;
+        this.notifyParticipants();
+      }
+      return;
+    }
+
+    if (event.type !== 'voice-state') return;
 
     this.remoteDeafened.set(userId, !!deafened);
     const participant = this.participants.get(userId);

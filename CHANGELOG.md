@@ -34,7 +34,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **A barra de sensibilidade não chegava ao fim.** O nível era a média do espectro inteiro, e as faixas agudas vazias puxavam a conta para baixo: mesmo gritando a barra mal passava da metade. Agora a medida é o volume da onda em decibéis, e a escala vai de 0 a 100% de ponta a ponta. O limiar salvo antes é convertido sozinho para a escala nova.
 - **O retorno da própria voz no teste de microfone picotava.** O som saía por um caminho de áudio paralelo ao do medidor; agora os dois saem do mesmo lugar.
 - **O indicador de fala piscava no meio das frases.** Passa a esperar um instante de silêncio antes de considerar que a pessoa parou de falar, em vez de reagir a cada pausa entre sílabas.
+- **A sensibilidade de entrada não fazia nada quando a voz passava pelo servidor de mídia.** Quem decidia se você estava falando era o limiar do próprio LiveKit, e o controle das Configurações só valia na voz em malha P2P. Agora cada pessoa aplica o próprio limiar à própria voz nos dois modos, e o resultado é o que os outros veem.
 - O tom de "Testar saída" entra e sai suave, sem o estalo de antes.
+- Trocar qualquer configuração de voz reabria o microfone na chamada pelo servidor de mídia, inclusive ao arrastar o controle de sensibilidade. Agora só a troca de dispositivo mexe no microfone.
 
 ### Alterado
 - O teste de microfone ganhou um botão para **desligar o retorno da própria voz**: sem fone, o alto-falante volta para o microfone e o cancelamento de eco corta pedaços da voz. Assim dá para conferir o nível sem se ouvir.
