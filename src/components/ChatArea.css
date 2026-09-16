@@ -493,6 +493,110 @@
   color: var(--interactive-active);
 }
 
+/* Imagens enviadas na mensagem */
+.message-image-link {
+  display: block;
+  margin-top: 8px;
+  max-width: 420px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-faint);
+  width: fit-content;
+}
+
+.message-image {
+  display: block;
+  max-width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  background-color: var(--bg-tertiary);
+}
+
+.message-image-fallback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-muted);
+  width: fit-content;
+}
+
+/* Tira de imagens escolhidas, acima da caixa de mensagem */
+.attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 10px 12px;
+}
+
+.attachment-preview {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-faint);
+  background-color: var(--bg-tertiary);
+}
+
+.attachment-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Enquanto o upload não termina, a miniatura fica apagada */
+.attachment-preview.uploading img {
+  opacity: 0.4;
+}
+
+.attachment-preview-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-normal);
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.attachment-preview-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background-color: var(--bg-floating);
+  border: 1px solid var(--border-faint);
+  border-radius: 50%;
+  color: var(--interactive-normal);
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+}
+
+.attachment-preview-remove:hover {
+  color: var(--interactive-active);
+  background-color: var(--bg-active);
+}
+
+.attachment-error {
+  font-size: 12px;
+  color: var(--danger-text-soft, #f5a2a2);
+  padding: 4px 4px 0;
+}
+
 /* Quem está digitando, logo abaixo da caixa */
 .typing-indicator {
   height: 20px;

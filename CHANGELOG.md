@@ -6,6 +6,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ## [Não lançado]
 
 ### Adicionado
+- **Imagens no chat**: escolha pelo botão "+" da caixa de mensagem, com pré-visualização antes de enviar, até 8 MB por imagem (PNG, JPG, GIF ou WebP). A imagem só aparece para os outros quando a mensagem é enviada; a escolhida e nunca enviada é descartada.
 - **Responder mensagens**: a resposta mostra um trecho da mensagem original; se ela for apagada, o trecho vira "mensagem apagada".
 - **Editar e apagar mensagens**: o autor edita a própria mensagem (fica marcada como "editada") e apaga; o dono do servidor pode apagar a de qualquer um.
 - **Reações com emoji** salvas no servidor: todos veem as mesmas reações e quem reagiu, no histórico também.

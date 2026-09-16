@@ -606,7 +606,7 @@ export function App() {
   };
 
   // Send message
-  const handleSendMessage = async (text: string, replyToId?: string) => {
+  const handleSendMessage = async (text: string, replyToId?: string, attachmentIds?: string[]) => {
     const targetChannelId = currentChannelId;
     // ID local provisório: o servidor devolve a mensagem oficial com este valor em "nonce"
     const localId = generateLocalSnowflake();
@@ -617,7 +617,7 @@ export function App() {
     const sent = realtimeSocket.send({
       type: 'message',
       channelId: targetChannelId,
-      data: { id: localId, content: text, replyToId },
+      data: { id: localId, content: text, replyToId, attachmentIds },
     });
 
     const newMessage: Message = {

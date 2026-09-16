@@ -42,7 +42,13 @@ export interface MessageReply {
 
 export interface Attachment {
   type: 'image' | 'code';
+  /** Só nas imagens enviadas: identifica o anexo no servidor */
+  id?: string;
   url?: string;
+  /** Nome original do arquivo, mostrado no lugar da imagem que não carregar */
+  name?: string;
+  contentType?: string;
+  size?: number;
   title?: string;
   language?: string;
   code?: string;

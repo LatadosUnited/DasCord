@@ -18,17 +18,33 @@ import {
 } from 'lucide-react';
 import { Channel, Message, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
+import {
+  ATTACHMENT_TYPES,
+  apiUploadAttachment,
+  attachmentFileError,
+} from '../services/attachments';
 import './ChatArea.css';
 
 /** Reações rápidas da barra de ações */
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀'];
+
+/** Imagem escolhida na caixa de mensagem, antes de virar mensagem */
+interface PendingAttachment {
+  localId: string;
+  name: string;
+  /** URL local só para a miniatura; é revogada ao sair da tira */
+  previewUrl: string;
+  /** ID no servidor; só existe depois que o upload termina */
+  id?: string;
+  failed?: boolean;
+}
 
 interface ChatAreaProps {
   channel: Channel | undefined;
   messages: Message[];
   currentUser?: User;
   dmUser?: User;
-  onSendMessage: (text: string, replyToId?: string) => void;
+  onSendMessage: (text: string, replyToId?: string, attachmentIds?: string[]) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
   onDeleteMessage: (messageId: string) => void;
@@ -62,27 +78,79 @@ export const ChatArea: FC<ChatAreaProps> = ({
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Trocar de canal descarta resposta e edição pendentes daquele canal
+  // Trocar de canal descarta resposta, edição e imagens pendentes daquele canal
   useEffect(() => {
     setReplyTo(null);
     setEditing(null);
     setPickerFor(null);
     setDeletingId(null);
+    setAttachmentError(null);
+    setAttachments((prev) => {
+      prev.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
   }, [channel?.id]);
 
-  const handleSend = () => {
-    if (inputText.trim()) {
-      onSendMessage(inputText.trim(), replyTo?.id);
-      setInputText('');
-      setReplyTo(null);
+  const uploadedIds = attachments.filter((a) => a.id).map((a) => a.id!);
+  const uploading = attachments.some((a) => !a.id && !a.failed);
+  const canSend = (inputText.trim().length > 0 || uploadedIds.length > 0) && !uploading;
+
+  /** Tira a imagem da tira e devolve a memória da miniatura */
+  const dropAttachments = (keep: (a: PendingAttachment) => boolean) => {
+    setAttachments((prev) => {
+      prev.filter((a) => !keep(a)).forEach((a) => URL.revokeObjectURL(a.previewUrl));
+      return prev.filter(keep);
+    });
+  };
+
+  const handlePickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = ''; // permite escolher o mesmo arquivo de novo
+    if (files.length === 0 || !channel) return;
+    setAttachmentError(null);
+
+    for (const file of files) {
+      const problem = attachmentFileError(file);
+      if (problem) {
+        setAttachmentError(problem);
+        continue;
+      }
+      const pending: PendingAttachment = {
+        localId: `${Date.now()}-${file.name}`,
+        name: file.name,
+        previewUrl: URL.createObjectURL(file),
+      };
+      setAttachments((prev) => [...prev, pending]);
+
+      const res = await apiUploadAttachment(channel.id, file);
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.localId === pending.localId
+            ? { ...a, id: res.ok ? res.data.attachment.id : undefined, failed: !res.ok }
+            : a
+        )
+      );
+      if (!res.ok) setAttachmentError(`${file.name}: ${res.error}`);
     }
+  };
+
+  const handleSend = () => {
+    if (!canSend) return;
+    onSendMessage(inputText.trim(), replyTo?.id, uploadedIds.length > 0 ? uploadedIds : undefined);
+    setInputText('');
+    setReplyTo(null);
+    setAttachmentError(null);
+    dropAttachments(() => false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -265,7 +333,18 @@ export const ChatArea: FC<ChatAreaProps> = ({
                 )}
 
                 {msg.attachments?.map((att, idx) =>
-                  att.type === 'code' && att.code ? (
+                  att.type === 'image' && att.url ? (
+                    <a
+                      key={att.id ?? idx}
+                      href={att.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="message-image-link"
+                      title={att.name}
+                    >
+                      <img src={att.url} alt={att.name || 'Imagem'} className="message-image" loading="lazy" />
+                    </a>
+                  ) : att.type === 'code' && att.code ? (
                     <div key={idx} className="message-code-block">
                       <div className="code-block-header">
                         <span>{att.title || 'Rust Code'}</span>
@@ -361,10 +440,48 @@ export const ChatArea: FC<ChatAreaProps> = ({
             </button>
           </div>
         )}
+        {attachments.length > 0 && (
+          <div className="attachment-tray">
+            {attachments.map((att) => (
+              <div
+                key={att.localId}
+                className={`attachment-preview ${att.id ? '' : 'uploading'}`}
+                title={att.name}
+              >
+                <img src={att.previewUrl} alt={att.name} />
+                {!att.id && (
+                  <span className="attachment-preview-status">
+                    {att.failed ? 'falhou' : 'enviando...'}
+                  </span>
+                )}
+                <button
+                  className="attachment-preview-remove"
+                  title="Tirar esta imagem"
+                  onClick={() => dropAttachments((a) => a.localId !== att.localId)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {attachmentError && <div className="attachment-error">{attachmentError}</div>}
         <div className="chat-input-bar">
-          <button className="chat-input-btn" title="Enviar arquivo">
+          <button
+            className="chat-input-btn"
+            title="Enviar imagem"
+            onClick={() => fileInputRef.current?.click()}
+          >
             <PlusCircle size={22} />
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ATTACHMENT_TYPES.join(',')}
+            multiple
+            onChange={handlePickFiles}
+            hidden
+          />
 
           <input
             ref={inputRef}
@@ -392,7 +509,7 @@ export const ChatArea: FC<ChatAreaProps> = ({
           >
             <Smile size={22} />
           </button>
-          {inputText.trim() && (
+          {canSend && (
             <button className="chat-input-btn chat-send-btn" onClick={handleSend} title="Enviar mensagem">
               <Send size={20} />
             </button>

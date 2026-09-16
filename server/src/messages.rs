@@ -13,6 +13,8 @@ pub const MAX_CHANNEL_ID_LEN: usize = 100;
 pub const MAX_EMOJI_CHARS: usize = 16;
 /// Emojis diferentes por mensagem
 const MAX_REACTIONS_PER_MESSAGE: usize = 20;
+/// Imagens por mensagem
+pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 10;
 /// Trecho da mensagem respondida mostrado acima da resposta
 const REPLY_PREVIEW_CHARS: usize = 120;
 
@@ -22,6 +24,20 @@ pub struct ReactionDto {
     /// Quem reagiu; o app marca a reação como sua olhando esta lista
     #[serde(rename = "userIds")]
     pub user_ids: Vec<String>,
+}
+
+/// Imagem enviada junto com a mensagem
+#[derive(Serialize, Debug, Clone)]
+pub struct AttachmentDto {
+    pub id: String,
+    /// Sempre "image" por enquanto; o app já distingue de blocos de código
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub url: String,
+    pub name: String,
+    #[serde(rename = "contentType")]
+    pub content_type: String,
+    pub size: i64,
 }
 
 /// Mensagem respondida, como ela era no momento da leitura
@@ -49,6 +65,7 @@ pub struct MessageDto {
     #[serde(rename = "replyTo", skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<ReplyDto>,
     pub reactions: Vec<ReactionDto>,
+    pub attachments: Vec<AttachmentDto>,
 }
 
 /// Colunas da mensagem e, por LEFT JOIN, da mensagem respondida
@@ -72,6 +89,7 @@ impl MessageStore {
         author: &PublicUser,
         content: &str,
         reply_to_id: Option<&str>,
+        attachment_ids: &[String],
         snowflake: &SnowflakeGenerator,
     ) -> Result<MessageDto, String> {
         let id = snowflake.next_id_string();
@@ -96,7 +114,81 @@ impl MessageStore {
         )
         .map_err(internal_error)?;
 
-        fetch_one(&conn, channel_id, &id)?.ok_or_else(|| "Mensagem não encontrada.".to_string())
+        // Liga as imagens já enviadas: só as desta pessoa, deste canal e ainda sem mensagem
+        if !attachment_ids.is_empty() {
+            let ids = &attachment_ids[..attachment_ids.len().min(MAX_ATTACHMENTS_PER_MESSAGE)];
+            let placeholders = vec!["?"; ids.len()].join(",");
+            let mut values = vec![id.clone(), author.id.clone(), channel_id.to_string()];
+            values.extend(ids.iter().cloned());
+            conn.execute(
+                &format!(
+                    "UPDATE message_attachments SET message_id = ?
+                     WHERE message_id IS NULL AND uploaded_by = ? AND channel_id = ?
+                       AND id IN ({placeholders})"
+                ),
+                params_from_iter(values.iter()),
+            )
+            .map_err(internal_error)?;
+        }
+
+        let mut message =
+            fetch_one(&conn, channel_id, &id)?.ok_or_else(|| "Mensagem não encontrada.".to_string())?;
+        attach_attachments(&conn, std::slice::from_mut(&mut message))?;
+        Ok(message)
+    }
+
+    /// Guarda uma imagem recém-enviada, ainda sem mensagem.
+    /// Ela só aparece para alguém quando a mensagem que a cita é enviada.
+    pub fn create_attachment(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        url: &str,
+        name: &str,
+        content_type: &str,
+        size: i64,
+        snowflake: &SnowflakeGenerator,
+    ) -> Result<AttachmentDto, String> {
+        let id = snowflake.next_id_string();
+        let conn = self.db.conn();
+        conn.execute(
+            "INSERT INTO message_attachments
+                (id, message_id, channel_id, uploaded_by, url, name, content_type, size, created_at)
+             VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, channel_id, user_id, url, name, content_type, size, now_ms()],
+        )
+        .map_err(internal_error)?;
+
+        Ok(AttachmentDto {
+            id,
+            kind: "image".to_string(),
+            url: url.to_string(),
+            name: name.to_string(),
+            content_type: content_type.to_string(),
+            size,
+        })
+    }
+
+    /// Uploads que nunca viraram mensagem (a pessoa desistiu ou fechou o app).
+    /// Devolve as URLs para que os arquivos também saiam do disco.
+    pub fn purge_orphan_attachments(&self, older_than_ms: i64) -> Result<Vec<String>, String> {
+        let cutoff = now_ms() - older_than_ms;
+        let conn = self.db.conn();
+        let mut stmt = conn
+            .prepare("SELECT url FROM message_attachments WHERE message_id IS NULL AND created_at < ?1")
+            .map_err(internal_error)?;
+        let urls = stmt
+            .query_map(params![cutoff], |r| r.get::<_, String>(0))
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(internal_error)?;
+        drop(stmt);
+
+        conn.execute(
+            "DELETE FROM message_attachments WHERE message_id IS NULL AND created_at < ?1",
+            params![cutoff],
+        )
+        .map_err(internal_error)?;
+        Ok(urls)
     }
 
     /// Últimas `limit` mensagens anteriores a `before` (ms), em ordem cronológica
@@ -120,6 +212,7 @@ impl MessageStore {
         let mut messages: Vec<MessageDto> = rows.into_iter().flatten().collect();
         messages.reverse();
         attach_reactions(&conn, &mut messages)?;
+        attach_attachments(&conn, &mut messages)?;
         Ok(messages)
     }
 
@@ -145,8 +238,8 @@ impl MessageStore {
 
         let mut message = fetch_one(&conn, channel_id, message_id)?;
         if let Some(message) = message.as_mut() {
-            let mut one = std::slice::from_mut(message);
-            attach_reactions(&conn, &mut one)?;
+            attach_reactions(&conn, std::slice::from_mut(message))?;
+            attach_attachments(&conn, std::slice::from_mut(message))?;
         }
         Ok(message)
     }
@@ -274,6 +367,7 @@ fn row_to_message(row: &Row, channel_id: &str) -> Option<MessageDto> {
         edited_at: row.get(4).ok().flatten(),
         reply_to,
         reactions: Vec::new(),
+        attachments: Vec::new(),
     })
 }
 
@@ -282,6 +376,49 @@ fn truncate(content: &str) -> String {
         return content.to_string();
     }
     content.chars().take(REPLY_PREVIEW_CHARS).collect::<String>() + "…"
+}
+
+/// Preenche as imagens das mensagens em uma consulta só
+fn attach_attachments(conn: &Connection, messages: &mut [MessageDto]) -> Result<(), String> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let placeholders = vec!["?"; messages.len()].join(",");
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT message_id, id, url, name, content_type, size FROM message_attachments
+             WHERE message_id IN ({placeholders}) ORDER BY created_at, id"
+        ))
+        .map_err(internal_error)?;
+
+    let ids = messages.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    let rows = stmt
+        .query_map(params_from_iter(ids.iter()), |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                AttachmentDto {
+                    id: r.get(1)?,
+                    kind: "image".to_string(),
+                    url: r.get(2)?,
+                    name: r.get(3)?,
+                    content_type: r.get(4)?,
+                    size: r.get(5)?,
+                },
+            ))
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(internal_error)?;
+
+    let mut by_message: HashMap<String, Vec<AttachmentDto>> = HashMap::new();
+    for (message_id, attachment) in rows {
+        by_message.entry(message_id).or_default().push(attachment);
+    }
+    for message in messages.iter_mut() {
+        if let Some(attachments) = by_message.remove(&message.id) {
+            message.attachments = attachments;
+        }
+    }
+    Ok(())
 }
 
 /// Preenche as reações das mensagens em uma consulta só
