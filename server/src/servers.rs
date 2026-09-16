@@ -11,6 +11,16 @@ const MIN_SERVER_NAME_CHARS: usize = 2;
 const MAX_SERVER_NAME_CHARS: usize = 100;
 /// Mesmo limite do Discord: ninguém participa de mais de 100 servidores
 const MAX_SERVERS_PER_USER: i64 = 100;
+
+const MIN_CHANNEL_NAME_CHARS: usize = 1;
+const MAX_CHANNEL_NAME_CHARS: usize = 60;
+const MAX_CHANNEL_TOPIC_CHARS: usize = 300;
+const MAX_CHANNEL_CATEGORY_CHARS: usize = 60;
+const MAX_CHANNELS_PER_SERVER: i64 = 100;
+
+/// Categoria de quem não escolheu nenhuma, igual à dos canais que vêm no servidor novo
+const DEFAULT_TEXT_CATEGORY: &str = "Canais de texto";
+const DEFAULT_VOICE_CATEGORY: &str = "Canais de voz";
 const INVITE_CODE_LEN: usize = 8;
 /// Sem 0/O, 1/l/I: o código pode ser ditado ou copiado à mão
 const INVITE_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -110,6 +120,69 @@ fn validate_server_name(name: &str) -> Result<String, ServerError> {
     Ok(name.to_string())
 }
 
+fn validate_channel_kind(kind: &str) -> Result<String, ServerError> {
+    match kind {
+        "text" | "voice" => Ok(kind.to_string()),
+        _ => Err(ServerError::Invalid("Tipo de canal inválido.".to_string())),
+    }
+}
+
+/// Canal de texto vira minúsculo e sem espaços, como no Discord; o de voz fica
+/// como foi escrito, que é o padrão dos canais criados junto com o servidor.
+fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut pending_dash = false;
+    for ch in name.chars() {
+        if ch.is_alphanumeric() {
+            if pending_dash && !out.is_empty() {
+                out.push('-');
+            }
+            pending_dash = false;
+            out.extend(ch.to_lowercase());
+        } else {
+            pending_dash = true;
+        }
+    }
+    out
+}
+
+fn validate_channel_name(name: &str, kind: &str) -> Result<String, ServerError> {
+    let name = if kind == "text" { slugify(name) } else { name.trim().to_string() };
+    let len = name.chars().count();
+    if len < MIN_CHANNEL_NAME_CHARS || len > MAX_CHANNEL_NAME_CHARS {
+        return Err(ServerError::Invalid(format!(
+            "O nome do canal deve ter entre {} e {} caracteres.",
+            MIN_CHANNEL_NAME_CHARS, MAX_CHANNEL_NAME_CHARS
+        )));
+    }
+    Ok(name)
+}
+
+fn validate_channel_topic(topic: &str) -> Result<String, ServerError> {
+    let topic = topic.trim();
+    if topic.chars().count() > MAX_CHANNEL_TOPIC_CHARS {
+        return Err(ServerError::Invalid(format!(
+            "O assunto do canal deve ter no máximo {} caracteres.",
+            MAX_CHANNEL_TOPIC_CHARS
+        )));
+    }
+    Ok(topic.to_string())
+}
+
+fn validate_channel_category(category: &str, kind: &str) -> Result<String, ServerError> {
+    let category = category.trim();
+    if category.is_empty() {
+        return Ok(if kind == "voice" { DEFAULT_VOICE_CATEGORY } else { DEFAULT_TEXT_CATEGORY }.to_string());
+    }
+    if category.chars().count() > MAX_CHANNEL_CATEGORY_CHARS {
+        return Err(ServerError::Invalid(format!(
+            "O nome da categoria deve ter no máximo {} caracteres.",
+            MAX_CHANNEL_CATEGORY_CHARS
+        )));
+    }
+    Ok(category.to_string())
+}
+
 fn is_member(conn: &Connection, server_id: &str, user_id: &str) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT 1 FROM server_members WHERE server_id = ?1 AND user_id = ?2",
@@ -188,6 +261,17 @@ fn server_dto(conn: &Connection, server_id: &str) -> rusqlite::Result<Option<Ser
     Ok(Some(server))
 }
 
+/// Tipo do canal, conferindo que ele pertence mesmo a este servidor
+fn channel_kind(conn: &Connection, server_id: &str, channel_id: &str) -> Result<String, ServerError> {
+    conn.query_row(
+        "SELECT kind FROM channels WHERE id = ?1 AND server_id = ?2",
+        params![channel_id, server_id],
+        |r| r.get(0),
+    )
+    .optional()?
+    .ok_or(ServerError::NotFound("Canal não encontrado."))
+}
+
 fn member_ids_of(conn: &Connection, server_id: &str) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT user_id FROM server_members WHERE server_id = ?1")?;
     let ids = stmt.query_map([server_id], |r| r.get(0))?.collect();
@@ -262,6 +346,141 @@ impl ServerStore {
         let conn = self.db.conn();
         require_owner(&conn, server_id, user_id)?;
         conn.execute("UPDATE servers SET name = ?1 WHERE id = ?2", params![name, server_id])?;
+        server_dto(&conn, server_id)?.ok_or(ServerError::NotFound(SERVER_NOT_FOUND))
+    }
+
+    // ---------- Canais ----------
+
+    pub fn create_channel(
+        &self,
+        server_id: &str,
+        user_id: &str,
+        name: &str,
+        kind: &str,
+        category: &str,
+        snowflake: &SnowflakeGenerator,
+    ) -> Result<ServerDto, ServerError> {
+        let kind = validate_channel_kind(kind)?;
+        let name = validate_channel_name(name, &kind)?;
+        let category = validate_channel_category(category, &kind)?;
+
+        let conn = self.db.conn();
+        require_owner(&conn, server_id, user_id)?;
+
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM channels WHERE server_id = ?1", [server_id], |r| r.get(0))?;
+        if count >= MAX_CHANNELS_PER_SERVER {
+            return Err(ServerError::Invalid(format!(
+                "Este servidor já tem o máximo de {} canais.",
+                MAX_CHANNELS_PER_SERVER
+            )));
+        }
+
+        // Entra no fim da lista; a ordem fina fica por conta de reorder_channels
+        let position: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM channels WHERE server_id = ?1",
+            [server_id],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO channels (id, server_id, name, kind, category, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![snowflake.next_id_string(), server_id, name, kind, category, position],
+        )?;
+        server_dto(&conn, server_id)?.ok_or(ServerError::NotFound(SERVER_NOT_FOUND))
+    }
+
+    /// Campo não enviado fica como está: dá para trocar só o nome, só o assunto ou só a categoria
+    pub fn update_channel(
+        &self,
+        server_id: &str,
+        channel_id: &str,
+        user_id: &str,
+        name: Option<&str>,
+        topic: Option<&str>,
+        category: Option<&str>,
+    ) -> Result<ServerDto, ServerError> {
+        let conn = self.db.conn();
+        require_owner(&conn, server_id, user_id)?;
+        let kind = channel_kind(&conn, server_id, channel_id)?;
+
+        if let Some(name) = name {
+            let name = validate_channel_name(name, &kind)?;
+            conn.execute("UPDATE channels SET name = ?1 WHERE id = ?2", params![name, channel_id])?;
+        }
+        if let Some(topic) = topic {
+            let topic = validate_channel_topic(topic)?;
+            conn.execute("UPDATE channels SET topic = ?1 WHERE id = ?2", params![topic, channel_id])?;
+        }
+        if let Some(category) = category {
+            let category = validate_channel_category(category, &kind)?;
+            conn.execute("UPDATE channels SET category = ?1 WHERE id = ?2", params![category, channel_id])?;
+        }
+        server_dto(&conn, server_id)?.ok_or(ServerError::NotFound(SERVER_NOT_FOUND))
+    }
+
+    /// Devolve o servidor já sem o canal, e o tipo do que saiu: se era de voz,
+    /// quem estava na chamada precisa ser tirado de lá.
+    pub fn delete_channel(
+        &self,
+        server_id: &str,
+        channel_id: &str,
+        user_id: &str,
+    ) -> Result<(ServerDto, String), ServerError> {
+        let mut conn = self.db.conn();
+        require_owner(&conn, server_id, user_id)?;
+        let kind = channel_kind(&conn, server_id, channel_id)?;
+
+        // Sem canal de texto não sobra para onde voltar
+        if kind == "text" {
+            let texts: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM channels WHERE server_id = ?1 AND kind = 'text'",
+                [server_id],
+                |r| r.get(0),
+            )?;
+            if texts <= 1 {
+                return Err(ServerError::Invalid(
+                    "O servidor precisa de pelo menos um canal de texto.".to_string(),
+                ));
+            }
+        }
+
+        let tx = conn.transaction()?;
+        // messages não tem chave estrangeira para channels; reações e anexos caem junto por cascata
+        tx.execute("DELETE FROM messages WHERE channel_id = ?1", [channel_id])?;
+        tx.execute("DELETE FROM message_attachments WHERE channel_id = ?1", [channel_id])?;
+        tx.execute("DELETE FROM channels WHERE id = ?1", [channel_id])?;
+        tx.commit()?;
+
+        let server = server_dto(&conn, server_id)?.ok_or(ServerError::NotFound(SERVER_NOT_FOUND))?;
+        Ok((server, kind))
+    }
+
+    /// Recebe os IDs na ordem desejada; o que ficar de fora vai para o fim, na ordem de antes
+    pub fn reorder_channels(
+        &self,
+        server_id: &str,
+        user_id: &str,
+        ordered_ids: &[String],
+    ) -> Result<ServerDto, ServerError> {
+        let mut conn = self.db.conn();
+        require_owner(&conn, server_id, user_id)?;
+
+        let tx = conn.transaction()?;
+        for (position, channel_id) in ordered_ids.iter().enumerate() {
+            // O filtro por server_id impede reordenar canal de outro servidor
+            tx.execute(
+                "UPDATE channels SET position = ?1 WHERE id = ?2 AND server_id = ?3",
+                params![position as i64, channel_id, server_id],
+            )?;
+        }
+        // Os não citados vão depois de todos os citados, mantendo a ordem relativa
+        tx.execute(
+            "UPDATE channels SET position = position + ?1 WHERE server_id = ?2 AND id NOT IN
+                (SELECT value FROM json_each(?3))",
+            params![ordered_ids.len() as i64, server_id, serde_json::to_string(ordered_ids).unwrap_or_else(|_| "[]".to_string())],
+        )?;
+        tx.commit()?;
+
         server_dto(&conn, server_id)?.ok_or(ServerError::NotFound(SERVER_NOT_FOUND))
     }
 

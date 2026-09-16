@@ -1,5 +1,5 @@
 import { FC, useEffect, useRef, useState } from 'react';
-import { Hash, Volume2, ChevronDown, MicOff, X } from 'lucide-react';
+import { Hash, Volume2, ChevronDown, MicOff, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Channel, Server, SettingsTab, User, UserStatus, VoiceState } from '../types';
 import { VoiceConnectionBar } from './VoiceConnectionBar';
 import { UserPanel } from './UserPanel';
@@ -25,6 +25,11 @@ interface ChannelSidebarProps {
   onInvite: () => void;
   onOpenServerSettings: () => void;
   onLeaveServer: () => void;
+  /** Só o dono cria, edita e exclui canais */
+  isOwner: boolean;
+  onCreateChannel: (category: string) => void;
+  onEditChannel: (channel: Channel) => void;
+  onDeleteChannel: (channel: Channel) => void;
 }
 
 export const ChannelSidebar: FC<ChannelSidebarProps> = ({
@@ -43,6 +48,10 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
   onInvite,
   onOpenServerSettings,
   onLeaveServer,
+  isOwner,
+  onCreateChannel,
+  onEditChannel,
+  onDeleteChannel,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -103,6 +112,18 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
           <div key={cat} className="channel-group">
             <div className="channel-category">
               <span>{cat}</span>
+              {isOwner && (
+                <div className="channel-category-actions">
+                  <button
+                    className="channel-action"
+                    onClick={() => onCreateChannel(cat)}
+                    title={`Criar canal em ${cat}`}
+                    aria-label={`Criar canal em ${cat}`}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              )}
             </div>
 
             {channels
@@ -130,6 +151,33 @@ export const ChannelSidebar: FC<ChannelSidebarProps> = ({
                         <Volume2 size={18} className={`channel-icon ${isVoiceActive ? 'voice-live' : ''}`} />
                       )}
                       <span className="channel-name">{channel.name}</span>
+                      {isOwner && (
+                        <div className="channel-item-actions">
+                          <button
+                            className="channel-action"
+                            // Sem isto, mexer no canal também entraria nele
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditChannel(channel);
+                            }}
+                            title="Editar canal"
+                            aria-label={`Editar ${channel.name}`}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            className="channel-action"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteChannel(channel);
+                            }}
+                            title="Excluir canal"
+                            aria-label={`Excluir ${channel.name}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {voiceParticipants.length > 0 && (

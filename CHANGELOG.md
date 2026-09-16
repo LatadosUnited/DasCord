@@ -16,6 +16,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Transmissão de tela** nos canais de voz: escolha de qualidade (720p30, 1080p30 ou 1080p60, ajustável durante a transmissão), selo "AO VIVO" e contador de quem está assistindo.
 - Quem está na chamada escolhe **assistir** cada transmissão; o vídeo só é enviado para quem pediu.
 
+- **Criar, editar e excluir canais.** Até agora todo servidor nascia com um canal de texto e um de voz, e ficava assim para sempre. O dono agora cria quantos quiser pelo "+" da categoria, renomeia, escreve um assunto, muda de categoria e exclui pelos botões que aparecem ao passar o mouse no canal. Canal de texto fica em minúsculas e sem espaços, como no Discord, e o nome final aparece enquanto você digita. O servidor sempre mantém pelo menos um canal de texto.
+
 ### Segurança
 - **Imagens do chat deixam de ser públicas.** Antes eram servidas por uma pasta aberta, com nomes sequenciais: quem acertasse (ou enumerasse) o endereço baixava a imagem, inclusive de mensagens diretas. Agora saem por `GET /api/attachments/{id}` com endereço assinado e validade de 15 minutos, gerado só para quem tem acesso ao canal. Avatares e ícones continuam abertos, por serem públicos por natureza.
 - O anexo passa a ser guardado pelo **nome do arquivo** (esquema v6), não pela URL inteira: o endereço do servidor não fica mais embutido em cada linha do banco.

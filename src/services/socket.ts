@@ -30,6 +30,7 @@ export interface SocketEvent {
     | 'server-member-left'
     | 'server-updated'
     | 'server-deleted'
+    | 'channel-deleted'
     | 'auth-ok'
     | 'auth-error';
   channelId: string;

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { ServerList } from './components/ServerList';
 import { ChannelSidebar } from './components/ChannelSidebar';
+import { ChannelDialog, ChannelDialogMode } from './components/servers/ChannelDialog';
 import { DMSidebar } from './components/DMSidebar';
 import { FriendsHub } from './components/FriendsHub';
 import { ChatArea } from './components/ChatArea';
@@ -101,6 +102,9 @@ export function App() {
   const [serverOnline, setServerOnline] = useState<boolean>(false);
   const [showVoiceStage, setShowVoiceStage] = useState<boolean>(false);
   const [serverDialog, setServerDialog] = useState<ServerDialog | null>(null);
+  const [channelDialog, setChannelDialog] = useState<
+    { mode: ChannelDialogMode; channel?: Channel; category?: string } | null
+  >(null);
   const [serverVersion, setServerVersion] = useState<ServerVersionInfo | null>(null);
   // A primeira carga de servidores da sessão abre o DasIdeia HQ
   const openedInitialServerRef = useRef(false);
@@ -301,6 +305,26 @@ export function App() {
     [leaveVoice]
   );
 
+  /** O canal sumiu: quem estava na chamada dele sai, e quem o tinha aberto vai para outro */
+  const handleChannelDeleted = useCallback(
+    (channelId: string) => {
+      if (voiceChannelIdRef.current === channelId) {
+        leaveVoice();
+      }
+      const apagado = channelsRef.current.find((c) => c.id === channelId);
+      setChannels((prev) => prev.filter((c) => c.id !== channelId));
+      setChannelDialog((prev) => (prev?.channel?.id === channelId ? null : prev));
+      setActiveChannelId((prev) => {
+        if (prev !== channelId) return prev;
+        const proximo = channelsRef.current.find(
+          (c) => c.serverId === apagado?.serverId && c.type === 'text' && c.id !== channelId
+        );
+        return proximo?.id ?? '';
+      });
+    },
+    [leaveVoice]
+  );
+
   const loadServers = useCallback(async () => {
     const res = await apiListServers();
     if (!res.ok) {
@@ -451,6 +475,9 @@ export function App() {
         upsertServer(event.data.server as ServerDto);
       } else if (event.type === 'server-deleted' && event.data) {
         removeServerLocally(event.data.serverId as string);
+      } else if (event.type === 'channel-deleted' && event.data) {
+        // O server-updated que vem junto já tira o canal da lista; aqui é a reação de quem estava nele
+        handleChannelDeleted(event.data.channelId as string);
       }
     });
 
@@ -468,6 +495,7 @@ export function App() {
     removeMember,
     upsertServer,
     removeServerLocally,
+    handleChannelDeleted,
   ]);
 
   // Versão do servidor: ao abrir o app e a cada reconexão (ele pode ter sido atualizado)
@@ -815,6 +843,10 @@ export function App() {
             onInvite={() => setServerDialog({ kind: 'invite', serverId: activeServerId })}
             onOpenServerSettings={() => setServerDialog({ kind: 'settings', serverId: activeServerId })}
             onLeaveServer={() => setServerDialog({ kind: 'leave', serverId: activeServerId })}
+            isOwner={!!currentServer?.ownerId && currentServer.ownerId === currentUser.id}
+            onCreateChannel={(category) => setChannelDialog({ mode: 'create', category })}
+            onEditChannel={(channel) => setChannelDialog({ mode: 'edit', channel })}
+            onDeleteChannel={(channel) => setChannelDialog({ mode: 'delete', channel })}
           />
         )}
 
@@ -887,6 +919,21 @@ export function App() {
       )}
 
       <VersionBanner serverVersion={serverVersion} />
+
+      {channelDialog && currentServer && (
+        <ChannelDialog
+          mode={channelDialog.mode}
+          serverId={currentServer.id}
+          channel={channelDialog.channel}
+          defaultCategory={channelDialog.category}
+          categories={[...new Set(currentServerChannels.map((c) => c.category))]}
+          onDone={(dto) => {
+            upsertServer(dto);
+            setChannelDialog(null);
+          }}
+          onClose={() => setChannelDialog(null)}
+        />
+      )}
 
       {/* Servidores: adicionar, convidar, configurar e sair */}
       {serverDialog?.kind === 'add' && (

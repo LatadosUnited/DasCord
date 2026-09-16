@@ -1,4 +1,4 @@
-import { Channel, Server, User, VoiceParticipant } from '../types';
+import { Channel, ChannelType, Server, User, VoiceParticipant } from '../types';
 import { jsonBody, request } from './api';
 
 /** Formato devolvido pela API */
@@ -99,6 +99,48 @@ export const apiUploadServerIcon = (serverId: string, file: File) =>
     headers: { 'Content-Type': file.type || 'application/octet-stream' },
     body: file,
   });
+
+// ---------- Canais ----------
+
+export const MAX_CHANNEL_NAME_CHARS = 60;
+export const MAX_CHANNEL_TOPIC_CHARS = 300;
+
+/** Espelha o servidor: canal de texto vira minúsculo e sem espaços */
+export const channelSlug = (name: string) =>
+  Array.from(name)
+    .map((ch) => (/\p{L}|\p{N}/u.test(ch) ? ch.toLowerCase() : ' '))
+    .join('')
+    .trim()
+    .replace(/\s+/g, '-');
+
+export const apiCreateChannel = (serverId: string, name: string, type: ChannelType, category: string) =>
+  request<{ server: ServerDto }>(
+    `/api/servers/${encodeURIComponent(serverId)}/channels`,
+    jsonBody('POST', { name, type, category })
+  );
+
+/** Só os campos enviados mudam */
+export const apiUpdateChannel = (
+  serverId: string,
+  channelId: string,
+  patch: { name?: string; topic?: string; category?: string }
+) =>
+  request<{ server: ServerDto }>(
+    `/api/servers/${encodeURIComponent(serverId)}/channels/${encodeURIComponent(channelId)}`,
+    jsonBody('PATCH', patch)
+  );
+
+export const apiDeleteChannel = (serverId: string, channelId: string) =>
+  request<{ server: ServerDto }>(
+    `/api/servers/${encodeURIComponent(serverId)}/channels/${encodeURIComponent(channelId)}`,
+    { method: 'DELETE' }
+  );
+
+export const apiReorderChannels = (serverId: string, channelIds: string[]) =>
+  request<{ server: ServerDto }>(
+    `/api/servers/${encodeURIComponent(serverId)}/channels/order`,
+    jsonBody('POST', { channelIds })
+  );
 
 export const apiDeleteServer = (serverId: string) =>
   request<{ success: boolean }>(`/api/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' });

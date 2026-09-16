@@ -263,3 +263,57 @@
   background-color: var(--danger);
   color: var(--text-on-color);
 }
+
+/* ---------- Criar e editar canal ---------- */
+
+.channel-type-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.choice-card.compact {
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+.choice-card.selected {
+  border-color: var(--brand);
+  background-color: var(--bg-hover);
+}
+
+/* Botões de dono na lista de canais: só aparecem ao passar o mouse */
+.channel-category-actions,
+.channel-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.channel-item-actions {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.channel-item:hover .channel-item-actions,
+.channel-item-actions:focus-within {
+  opacity: 1;
+}
+
+.channel-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-subtle);
+  cursor: pointer;
+}
+
+.channel-action:hover {
+  color: var(--text-header);
+  background-color: var(--bg-tertiary);
+}

@@ -121,6 +121,11 @@ impl VoiceRegistry {
         remove_user(&mut rooms, user_id, |room_id| in_server.iter().any(|id| id == room_id))
     }
 
+    /// O canal deixou de existir: a sala some junto
+    pub fn remove_channel(&self, channel_id: &str) {
+        self.rooms.lock().unwrap().remove(channel_id);
+    }
+
     pub fn remove_server(&self, server_id: &str) {
         self.rooms.lock().unwrap().retain(|_, room| room.server_id != server_id);
     }

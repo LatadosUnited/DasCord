@@ -292,6 +292,13 @@ async fn main() {
             "/api/servers/{server_id}/icon",
             post(upload_server_icon_handler).layer(DefaultBodyLimit::max(MAX_IMAGE_BYTES)),
         )
+        .route("/api/servers/{server_id}/channels", post(create_channel_handler))
+        // Estático antes do parâmetro: "order" nunca é confundido com um ID de canal
+        .route("/api/servers/{server_id}/channels/order", post(reorder_channels_handler))
+        .route(
+            "/api/servers/{server_id}/channels/{channel_id}",
+            patch(update_channel_handler).delete(delete_channel_handler),
+        )
         .route("/api/servers/{server_id}/leave", post(leave_server_handler))
         .route("/api/servers/{server_id}/members", get(server_members_handler))
         .route("/api/servers/{server_id}/voice", get(server_voice_handler))
@@ -942,6 +949,128 @@ async fn list_servers_handler(State(state): State<Arc<AppState>>, headers: Heade
 #[derive(Deserialize)]
 struct ServerNamePayload {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct CreateChannelPayload {
+    name: String,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    category: String,
+}
+
+/// Campo ausente fica como está; só o que vem é trocado
+#[derive(Deserialize)]
+struct UpdateChannelPayload {
+    name: Option<String>,
+    topic: Option<String>,
+    category: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReorderChannelsPayload {
+    #[serde(rename = "channelIds")]
+    channel_ids: Vec<String>,
+}
+
+async fn create_channel_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateChannelPayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.create_channel(
+        &server_id,
+        &user_id,
+        &payload.name,
+        &payload.kind,
+        &payload.category,
+        &state.snowflake,
+    ) {
+        Ok(server) => {
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn update_channel_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath((server_id, channel_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Json(payload): Json<UpdateChannelPayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.update_channel(
+        &server_id,
+        &channel_id,
+        &user_id,
+        payload.name.as_deref(),
+        payload.topic.as_deref(),
+        payload.category.as_deref(),
+    ) {
+        Ok(server) => {
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn delete_channel_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath((server_id, channel_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.delete_channel(&server_id, &channel_id, &user_id) {
+        Ok((server, kind)) => {
+            // Quem estava na chamada do canal apagado precisa sair de lá
+            if kind == "voice" {
+                state.voice.remove_channel(&channel_id);
+            }
+            let event = json!({
+                "type": "channel-deleted",
+                "channelId": channel_id,
+                "data": { "serverId": server_id, "channelId": channel_id },
+            });
+            publish_to_server(&state, &server_id, event);
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
+}
+
+async fn reorder_channels_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(server_id): AxumPath<String>,
+    headers: HeaderMap,
+    Json(payload): Json<ReorderChannelsPayload>,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    match state.servers.reorder_channels(&server_id, &user_id, &payload.channel_ids) {
+        Ok(server) => {
+            publish_server_updated(&state, &server);
+            (StatusCode::OK, Json(json!({ "success": true, "server": server })))
+        }
+        Err(err) => server_error(err),
+    }
 }
 
 async fn create_server_handler(
