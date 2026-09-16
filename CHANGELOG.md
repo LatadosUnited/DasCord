@@ -27,6 +27,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `GET /api/version` informa as regras de entrada, para a tela de login não oferecer o que o servidor recusa.
 
 ### Alterado
+- **O `App.tsx` deixou de ser dono de tudo.** Era um componente de 979 linhas com 23 estados, que cuidava ao mesmo tempo de sessão, servidores, canais, mensagens, voz, amigos e digitação — mexer em um assunto obrigava a entender os outros. O estado foi para um hook por assunto em `src/hooks`, e o despacho dos eventos do WebSocket, que era um `if/else` de 130 linhas, virou uma tabela que só liga cada evento ao domínio dono dele. Nada muda para quem usa o app.
 - As conexões de voz renegociam durante a chamada ("perfect negotiation"), o que também corrige o áudio de quem entra num canal onde alguém estava sem microfone liberado.
 - Mudo e ensurdecido agora chegam aos outros participantes; antes o ícone do microfone ficava desatualizado.
 
