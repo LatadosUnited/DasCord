@@ -59,7 +59,12 @@ export function applyMessageUpdate(existing: Message[], updated: Message): Messa
 }
 
 export function removeMessage(existing: Message[], messageId: string): Message[] {
-  return existing.filter((m) => m.id !== messageId);
+  return existing
+    .filter((m) => m.id !== messageId)
+    // Quem respondeu à mensagem apagada passa a mostrar "mensagem apagada" na hora
+    .map((m) =>
+      m.replyTo?.id === messageId ? { ...m, replyTo: { ...m.replyTo, content: '', deleted: true } } : m
+    );
 }
 
 /** Lista nova de quem reagiu com um emoji; sem ninguém, a reação sai da mensagem */
