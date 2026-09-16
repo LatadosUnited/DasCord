@@ -20,10 +20,10 @@ import {
   subscribeVoiceSettings,
 } from './voiceSettings';
 import type { User, VoiceParticipant } from '../types';
-import type { InputStatus, ScreenShareSnapshot } from './webrtc';
+import * as signal from './voiceSignaling';
+import { InputStatusStore } from './microphone';
+import type { ParticipantsListener, ScreenShareSnapshot } from './voiceTypes';
 import type { VoiceCredentials } from './voice';
-
-type ParticipantsListener = (participants: VoiceParticipant[]) => void;
 
 const EMPTY_SCREEN_SNAPSHOT: ScreenShareSnapshot = { local: null, viewerCount: 0, watching: [], remote: {} };
 
@@ -61,8 +61,7 @@ class SfuVoiceService {
   private screenSnapshot: ScreenShareSnapshot = EMPTY_SCREEN_SNAPSHOT;
   private screenListeners: Set<() => void> = new Set();
 
-  private inputStatus: InputStatus = 'ok';
-  private inputListeners: Set<() => void> = new Set();
+  private input = new InputStatusStore();
 
   async join(
     channelId: string,
@@ -121,11 +120,7 @@ class SfuVoiceService {
     this.joinGeneration++;
 
     if (this.currentChannelId && this.currentUser) {
-      realtimeSocket.send({
-        type: 'voice-leave',
-        channelId: this.currentChannelId,
-        data: { userId: this.currentUser.id },
-      });
+      signal.sendLeave(this.currentChannelId, this.currentUser.id);
     }
 
     this.audioElements.forEach((el) => el.remove());
@@ -146,7 +141,7 @@ class SfuVoiceService {
     this.watching.clear();
     this.remoteScreens.clear();
     this.isSpeaking = false;
-    this.setInputStatus('ok');
+    this.input.set('ok');
     this.notifyParticipants();
     this.notifyScreen();
     this.participantsListeners.clear();
@@ -166,11 +161,11 @@ class SfuVoiceService {
     } catch (err) {
       // Sem microfone ou sem permissão: entra só ouvindo
       console.warn('Não foi possível publicar o microfone:', err);
-      this.setInputStatus('unavailable');
+      this.input.set('unavailable');
       return false;
     }
     if (this.isMuted) await this.microphonePublication()?.mute();
-    this.setInputStatus('ok');
+    this.input.set('ok');
     this.syncParticipants();
     return true;
   }
@@ -431,59 +426,34 @@ class SfuVoiceService {
 
   private sendJoin() {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({
-      type: 'voice-join',
-      channelId: this.currentChannelId,
-      data: {
-        userId: this.currentUser.id,
-        name: this.currentUser.name,
-        avatar: this.currentUser.avatar,
-        muted: this.isMuted,
-        deafened: this.isDeafened,
-        streaming: this.localScreen !== null,
-      },
+    signal.sendJoin(this.currentChannelId, this.currentUser, {
+      muted: this.isMuted,
+      deafened: this.isDeafened,
+      streaming: this.localScreen !== null,
     });
   }
 
   private broadcastVoiceState() {
     if (!this.currentChannelId) return;
-    realtimeSocket.send({
-      type: 'voice-state',
-      channelId: this.currentChannelId,
-      data: { muted: this.isMuted, deafened: this.isDeafened },
-    });
+    signal.sendVoiceState(this.currentChannelId, this.isMuted, this.isDeafened);
   }
 
   private broadcastSpeaking(speaking: boolean) {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({
-      type: 'voice-speaking',
-      channelId: this.currentChannelId,
-      data: { userId: this.currentUser.id, speaking },
-    });
+    signal.sendSpeaking(this.currentChannelId, this.currentUser.id, speaking);
   }
 
   private sendScreenEvent(type: 'screen-start' | 'screen-stop') {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({ type, channelId: this.currentChannelId, data: { userId: this.currentUser.id } });
+    if (type === 'screen-start') signal.sendScreenStart(this.currentChannelId, this.currentUser.id);
+    else signal.sendScreenStop(this.currentChannelId, this.currentUser.id);
   }
 
   // ---------- Estado observável ----------
 
-  subscribeInputStatus = (cb: () => void) => {
-    this.inputListeners.add(cb);
-    return () => {
-      this.inputListeners.delete(cb);
-    };
-  };
+  subscribeInputStatus = this.input.subscribe;
 
-  getInputStatus = (): InputStatus => this.inputStatus;
-
-  private setInputStatus(status: InputStatus) {
-    if (this.inputStatus === status) return;
-    this.inputStatus = status;
-    this.inputListeners.forEach((cb) => cb());
-  }
+  getInputStatus = this.input.get;
 
   private notifyParticipants() {
     const list = Array.from(this.participants.values(), (p) => ({ ...p }));

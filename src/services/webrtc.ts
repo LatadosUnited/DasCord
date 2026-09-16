@@ -1,17 +1,23 @@
-import { useSyncExternalStore } from 'react';
 import { realtimeSocket, SocketEvent } from './socket';
+import * as signal from './voiceSignaling';
 import { ICE_SERVERS } from './config';
 import {
   applyOutputDevice,
-  audioInputConstraints,
-  averageVolume,
   getVoiceSettings,
   screenQualityPreset,
   ScreenQualityPreset,
-  screenVideoConstraints,
   subscribeVoiceSettings,
 } from './voiceSettings';
 import { PeerConnectionStatus, User, VoiceParticipant } from '../types';
+import { InputStatusStore, inputDeviceExists, openMicrophone } from './microphone';
+import { applySenderQuality, applyTrackQuality, captureScreen } from './screenCapture';
+import { SpeakingDetector, startSpeakingDetector } from './vad';
+import {
+  EMPTY_SCREEN_SNAPSHOT,
+  InputStatus,
+  ParticipantsListener,
+  ScreenShareSnapshot,
+} from './voiceTypes';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: ICE_SERVERS,
@@ -23,11 +29,6 @@ const ICE_DISCONNECT_GRACE_MS = 4000;
 const ICE_POLITE_EXTRA_DELAY_MS = 2500;
 const ICE_RESTART_RETRY_MS = 10000;
 const MAX_ICE_RESTARTS = 5;
-
-/** ok: microfone escolhido; fallback: o escolhido sumiu e usamos o padrão; unavailable: nenhum */
-export type InputStatus = 'ok' | 'fallback' | 'unavailable';
-
-type ParticipantsListener = (participants: VoiceParticipant[]) => void;
 
 /** Conexão com um participante, negociada no padrão "perfect negotiation" */
 interface PeerLink {
@@ -44,25 +45,10 @@ interface PeerLink {
   restartAttempts: number;
 }
 
-export interface ScreenShareSnapshot {
-  /** Nossa transmissão, para a prévia local */
-  local: MediaStream | null;
-  /** Quantas pessoas estão assistindo a nossa tela */
-  viewerCount: number;
-  /** Participantes cuja tela escolhemos assistir */
-  watching: string[];
-  /** Vídeo já recebido de cada participante assistido */
-  remote: Record<string, MediaStream>;
-}
-
-const EMPTY_SCREEN_SNAPSHOT: ScreenShareSnapshot = { local: null, viewerCount: 0, watching: [], remote: {} };
-
 class WebRTCVoiceService {
   private localStream: MediaStream | null = null;
-  private audioContext: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private vadInterval: any = null;
-  private isSpeaking = false;
+  /** Detecção de fala do nosso microfone; null quando não há microfone aberto */
+  private vad: SpeakingDetector | null = null;
   private currentUser: User | null = null;
   private currentChannelId: string | null = null;
   private isMuted = false;
@@ -75,8 +61,7 @@ class WebRTCVoiceService {
   private socketUnsub: (() => void) | null = null;
   private statusUnsub: (() => void) | null = null;
   private peerStates: Map<string, PeerConnectionStatus> = new Map();
-  private inputStatus: InputStatus = 'ok';
-  private inputListeners: Set<() => void> = new Set();
+  private input = new InputStatusStore();
   // Eventos de sinalização são tratados um de cada vez, na ordem de chegada
   private signalingChain: Promise<void> = Promise.resolve();
   // Incrementado a cada join/leave; um join que termina de aguardar com geração diferente foi cancelado
@@ -136,7 +121,7 @@ class WebRTCVoiceService {
 
   private async switchInputDevice(deviceId: string) {
     const generation = this.joinGeneration;
-    const stream = await this.openMicrophone(deviceId);
+    const stream = await openMicrophone(deviceId);
     if (!stream) return;
 
     // Saiu do canal enquanto o novo microfone abria
@@ -148,16 +133,6 @@ class WebRTCVoiceService {
   }
 
   // ---------- Microfone ----------
-
-  /** Abre o microfone; null sem permissão ou sem dispositivo */
-  private async openMicrophone(deviceId: string): Promise<MediaStream | null> {
-    try {
-      return await navigator.mediaDevices.getUserMedia({ audio: audioInputConstraints(deviceId), video: false });
-    } catch (err) {
-      console.warn('Não foi possível abrir o microfone:', err);
-      return null;
-    }
-  }
 
   /** Passa a transmitir este microfone para todos os participantes, no lugar do anterior */
   private useInputStream(stream: MediaStream, status: InputStatus) {
@@ -177,7 +152,7 @@ class WebRTCVoiceService {
 
     this.teardownVAD();
     this.setupVAD(stream);
-    this.setInputStatus(status);
+    this.input.set(status);
   }
 
   /** Coloca a trilha no transceiver de áudio do par; se ele só recebia, passa a enviar (renegocia) */
@@ -202,7 +177,7 @@ class WebRTCVoiceService {
   private async handleInputLost() {
     const generation = this.joinGeneration;
     const lost = this.localStream;
-    const stream = await this.openMicrophone('default');
+    const stream = await openMicrophone('default');
 
     if (generation !== this.joinGeneration || this.localStream !== lost) {
       stream?.getTracks().forEach((track) => track.stop());
@@ -216,19 +191,18 @@ class WebRTCVoiceService {
     this.localStream = null;
     this.teardownVAD();
     this.stopSpeaking();
-    this.setInputStatus('unavailable');
+    this.input.set('unavailable');
   }
 
   private async handleDeviceChange() {
     if (!this.currentChannelId) return;
 
-    if (this.inputStatus === 'unavailable') {
+    if (this.input.get() === 'unavailable') {
       await this.retryMicrophone();
-    } else if (this.inputStatus === 'fallback') {
+    } else if (this.input.get() === 'fallback') {
       // O microfone escolhido nas configurações voltou
       const wanted = getVoiceSettings().inputDeviceId;
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      if (devices.some((d) => d.kind === 'audioinput' && d.deviceId === wanted)) {
+      if (await inputDeviceExists(wanted)) {
         await this.switchInputDevice(wanted);
       }
     }
@@ -238,7 +212,7 @@ class WebRTCVoiceService {
   async retryMicrophone(): Promise<boolean> {
     if (!this.currentChannelId || this.localStream) return !!this.localStream;
     const generation = this.joinGeneration;
-    const stream = await this.openMicrophone(getVoiceSettings().inputDeviceId);
+    const stream = await openMicrophone(getVoiceSettings().inputDeviceId);
 
     if (generation !== this.joinGeneration || this.localStream) {
       stream?.getTracks().forEach((track) => track.stop());
@@ -249,30 +223,14 @@ class WebRTCVoiceService {
     return true;
   }
 
-  subscribeInputStatus = (cb: () => void) => {
-    this.inputListeners.add(cb);
-    return () => {
-      this.inputListeners.delete(cb);
-    };
-  };
+  subscribeInputStatus = this.input.subscribe;
 
-  getInputStatus = (): InputStatus => this.inputStatus;
-
-  private setInputStatus(status: InputStatus) {
-    if (this.inputStatus === status) return;
-    this.inputStatus = status;
-    this.inputListeners.forEach((cb) => cb());
-  }
+  getInputStatus = this.input.get;
 
   private stopSpeaking() {
-    if (!this.isSpeaking) return;
-    this.isSpeaking = false;
-    const me = this.currentUser && this.participants.get(this.currentUser.id);
-    if (me) {
-      me.speaking = false;
-      this.notifyParticipants();
-    }
-    this.broadcastSpeaking(false);
+    if (!this.vad?.speaking) return;
+    this.vad.markSilent();
+    this.applySpeaking(false);
   }
 
   async join(
@@ -302,16 +260,8 @@ class WebRTCVoiceService {
     });
     this.notifyParticipants();
 
-    // Captura o microfone do usuário
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioInputConstraints(getVoiceSettings().inputDeviceId),
-        video: false,
-      });
-    } catch (err) {
-      console.warn('Microfone físico não acessível ou permissão negada, utilizando áudio simulado:', err);
-    }
+    // Captura o microfone do usuário; sem ele, entra só ouvindo
+    const stream = await openMicrophone(getVoiceSettings().inputDeviceId);
 
     // leave() ou outro join() aconteceu enquanto aguardávamos a permissão do microfone
     if (generation !== this.joinGeneration) {
@@ -323,7 +273,7 @@ class WebRTCVoiceService {
       this.useInputStream(stream, 'ok');
     } else {
       // Entra só ouvindo; um microfone conectado depois é usado automaticamente
-      this.setInputStatus('unavailable');
+      this.input.set('unavailable');
     }
 
     // Escuta eventos de sinalização no WebSocket
@@ -349,41 +299,25 @@ class WebRTCVoiceService {
 
   private sendJoin() {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({
-      type: 'voice-join',
-      channelId: this.currentChannelId,
-      data: {
-        userId: this.currentUser.id,
-        name: this.currentUser.name,
-        avatar: this.currentUser.avatar,
-        muted: this.isMuted,
-        deafened: this.isDeafened,
-        streaming: !!this.screenStream,
-      },
-    });
+    signal.sendJoin(this.currentChannelId, this.currentUser, this.presence());
+  }
+
+  /** Como os outros nos veem agora */
+  private presence() {
+    return { muted: this.isMuted, deafened: this.isDeafened, streaming: !!this.screenStream };
   }
 
   /** Mostra para o servidor inteiro se estamos mutados ou ensurdecidos */
   private broadcastVoiceState() {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({
-      type: 'voice-state',
-      channelId: this.currentChannelId,
-      data: { muted: this.isMuted, deafened: this.isDeafened },
-    });
+    signal.sendVoiceState(this.currentChannelId, this.isMuted, this.isDeafened);
   }
 
   leave() {
     this.joinGeneration++;
 
     if (this.currentChannelId && this.currentUser) {
-      realtimeSocket.send({
-        type: 'voice-leave',
-        channelId: this.currentChannelId,
-        data: {
-          userId: this.currentUser.id,
-        },
-      });
+      signal.sendLeave(this.currentChannelId, this.currentUser.id);
     }
 
     // Para captura do microfone
@@ -416,8 +350,7 @@ class WebRTCVoiceService {
 
     this.participants.clear();
     this.peerStates.clear();
-    this.isSpeaking = false;
-    this.setInputStatus('ok');
+    this.input.set('ok');
     this.notifyParticipants();
     this.notifyScreen();
     this.participantsListeners.clear();
@@ -464,24 +397,12 @@ class WebRTCVoiceService {
   /** Abre o seletor de tela e começa a transmitir. Devolve uma mensagem de erro, ou null. */
   async startScreenShare(): Promise<string | null> {
     if (!this.currentChannelId || !this.currentUser || this.screenStream) return null;
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      return 'Este aplicativo não permite capturar a tela.';
-    }
 
     const generation = this.joinGeneration;
     const preset = screenQualityPreset(getVoiceSettings().screenQuality);
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: screenVideoConstraints(preset),
-        audio: false,
-      });
-    } catch (err) {
-      // Fechar o seletor sem escolher nada não é erro
-      if (err instanceof DOMException && err.name === 'NotAllowedError') return null;
-      console.warn('Não foi possível capturar a tela:', err);
-      return 'Não foi possível capturar a tela.';
-    }
+    const capture = await captureScreen(preset);
+    if (!capture.stream) return capture.error;
+    const stream = capture.stream;
 
     // Saiu do canal (ou já começou outra transmissão) enquanto o seletor estava aberto
     if (generation !== this.joinGeneration || this.screenStream) {
@@ -489,21 +410,15 @@ class WebRTCVoiceService {
       return null;
     }
 
-    const track = stream.getVideoTracks()[0];
-    track.contentHint = preset.contentHint;
     // Botão "Parar de compartilhar" do próprio sistema
-    track.addEventListener('ended', () => {
+    stream.getVideoTracks()[0].addEventListener('ended', () => {
       if (this.screenStream === stream) this.stopScreenShare();
     });
 
     this.screenStream = stream;
     this.appliedScreenQuality = preset.id;
     this.setLocalStreaming(true);
-    realtimeSocket.send({
-      type: 'screen-start',
-      channelId: this.currentChannelId,
-      data: { userId: this.currentUser.id },
-    });
+    signal.sendScreenStart(this.currentChannelId, this.currentUser.id);
     return null;
   }
 
@@ -517,11 +432,7 @@ class WebRTCVoiceService {
     this.setLocalStreaming(false);
 
     if (this.currentChannelId && this.currentUser) {
-      realtimeSocket.send({
-        type: 'screen-stop',
-        channelId: this.currentChannelId,
-        data: { userId: this.currentUser.id },
-      });
+      signal.sendScreenStop(this.currentChannelId, this.currentUser.id);
     }
   }
 
@@ -532,11 +443,7 @@ class WebRTCVoiceService {
 
     this.watching.add(peerId);
     this.notifyScreen();
-    realtimeSocket.send({
-      type: 'screen-watch',
-      channelId: this.currentChannelId,
-      data: { from: this.currentUser.id, to: peerId },
-    });
+    signal.sendWatchScreen(this.currentChannelId, this.currentUser.id, peerId);
   }
 
   stopWatchingScreen(peerId: string) {
@@ -544,11 +451,7 @@ class WebRTCVoiceService {
 
     this.forgetWatching(peerId);
     if (this.currentChannelId && this.currentUser) {
-      realtimeSocket.send({
-        type: 'screen-unwatch',
-        channelId: this.currentChannelId,
-        data: { from: this.currentUser.id, to: peerId },
-      });
+      signal.sendUnwatchScreen(this.currentChannelId, this.currentUser.id, peerId);
     }
   }
 
@@ -588,7 +491,7 @@ class WebRTCVoiceService {
       // Mudar a direção dispara a renegociação
       transceiver.sender
         .replaceTrack(track)
-        .then(() => this.applySenderQuality(transceiver.sender, preset))
+        .then(() => applySenderQuality(transceiver.sender, preset))
         .catch((e) => console.warn('Erro ao retomar envio da tela:', e));
       transceiver.direction = 'sendonly';
     } else {
@@ -613,83 +516,42 @@ class WebRTCVoiceService {
     const track = this.screenStream?.getVideoTracks()[0];
     if (!track) return;
 
-    track.contentHint = preset.contentHint;
-    track.applyConstraints(screenVideoConstraints(preset)).catch((e) => {
-      console.warn('Não foi possível aplicar a qualidade da tela:', e);
-    });
+    applyTrackQuality(track, preset);
     this.screenWatchers.forEach((peerId) => {
       const sender = this.peers.get(peerId)?.screenTransceiver?.sender;
-      if (sender) this.applySenderQuality(sender, preset);
+      if (sender) applySenderQuality(sender, preset);
     });
-  }
-
-  private applySenderQuality(sender: RTCRtpSender, preset: ScreenQualityPreset) {
-    const params = sender.getParameters();
-    // Antes da primeira negociação ainda não há encodings; valem os sendEncodings da criação
-    if (!params.encodings?.length) return;
-    params.encodings[0].maxBitrate = preset.maxBitrate;
-    params.encodings[0].maxFramerate = preset.frameRate;
-    sender.setParameters(params).catch((e) => console.warn('Erro ao ajustar bitrate da tela:', e));
   }
 
   // ---------- Detecção de fala ----------
 
-  // Voice Activity Detection (VAD)
+  /** Liga o detector a este microfone: falar aqui vira aviso para todo o canal */
   private setupVAD(stream: MediaStream) {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      this.audioContext = new AudioCtx();
-      const source = this.audioContext.createMediaStreamSource(stream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-      source.connect(this.analyser);
-
-      const buffer = new Uint8Array(this.analyser.frequencyBinCount);
-
-      this.vadInterval = setInterval(() => {
-        if (this.isMuted || !this.analyser) return;
-
-        // Limiar de fala ajustável em Configurações > Voz e Áudio
-        const speakingNow = averageVolume(this.analyser, buffer) > getVoiceSettings().inputSensitivity;
-        if (speakingNow !== this.isSpeaking) {
-          this.isSpeaking = speakingNow;
-          if (this.currentUser) {
-            const me = this.participants.get(this.currentUser.id);
-            if (me) {
-              me.speaking = speakingNow;
-              this.notifyParticipants();
-            }
-            this.broadcastSpeaking(speakingNow);
-          }
-        }
-      }, 100);
-    } catch (e) {
-      console.warn('Erro ao configurar AnalyserNode VAD:', e);
-    }
+    this.vad = startSpeakingDetector(stream, {
+      isMuted: () => this.isMuted,
+      onChange: (speaking) => this.applySpeaking(speaking),
+    });
   }
 
   private teardownVAD() {
-    if (this.vadInterval) {
-      clearInterval(this.vadInterval);
-      this.vadInterval = null;
+    this.vad?.stop();
+    this.vad = null;
+  }
+
+  /** Mostra na nossa lista e conta para os outros participantes */
+  private applySpeaking(speaking: boolean) {
+    if (!this.currentUser) return;
+    const me = this.participants.get(this.currentUser.id);
+    if (me) {
+      me.speaking = speaking;
+      this.notifyParticipants();
     }
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close().catch(() => {});
-    }
-    this.audioContext = null;
-    this.analyser = null;
+    this.broadcastSpeaking(speaking);
   }
 
   private broadcastSpeaking(speaking: boolean) {
     if (!this.currentChannelId || !this.currentUser) return;
-    realtimeSocket.send({
-      type: 'voice-speaking',
-      channelId: this.currentChannelId,
-      data: {
-        userId: this.currentUser.id,
-        speaking,
-      },
-    });
+    signal.sendSpeaking(this.currentChannelId, this.currentUser.id, speaking);
   }
 
   // ---------- Sinalização ----------
@@ -733,21 +595,7 @@ class WebRTCVoiceService {
         this.notifyParticipants();
 
         // Envia confirmação de presença (anúncio) de volta para o recém-chegado saber quem já está no canal
-        realtimeSocket.send({
-          type: 'voice-announce',
-          channelId: event.channelId,
-          data: {
-            to: data.userId,
-            user: {
-              id: me,
-              name: this.currentUser.name,
-              avatar: this.currentUser.avatar,
-              muted: this.isMuted,
-              deafened: this.isDeafened,
-              streaming: !!this.screenStream,
-            },
-          },
-        });
+        signal.sendAnnounce(event.channelId, data.userId, this.currentUser, this.presence());
 
         // Quem já estava no canal inicia a conexão com o recém-chegado
         this.ensurePeer(data.userId, true);
@@ -813,11 +661,7 @@ class WebRTCVoiceService {
         await pc.setLocalDescription();
         if (generation !== this.joinGeneration) return;
 
-        realtimeSocket.send({
-          type: 'voice-answer',
-          channelId: event.channelId,
-          data: { from: me, to: data.from, answer: pc.localDescription },
-        });
+        signal.sendAnswer(event.channelId, me, data.from, pc.localDescription);
         break;
       }
 
@@ -938,15 +782,7 @@ class WebRTCVoiceService {
     // Candidatos ICE
     pc.onicecandidate = (event) => {
       if (event.candidate && this.currentChannelId && this.currentUser) {
-        realtimeSocket.send({
-          type: 'voice-candidate',
-          channelId: this.currentChannelId,
-          data: {
-            from: this.currentUser.id,
-            to: peerId,
-            candidate: event.candidate,
-          },
-        });
+        signal.sendCandidate(this.currentChannelId, this.currentUser.id, peerId, event.candidate);
       }
     };
 
@@ -957,15 +793,7 @@ class WebRTCVoiceService {
         await pc.setLocalDescription();
         // O estado pode ter mudado até aqui; só uma oferta vai como oferta
         if (pc.localDescription?.type !== 'offer' || !this.currentChannelId || !this.currentUser) return;
-        realtimeSocket.send({
-          type: 'voice-offer',
-          channelId: this.currentChannelId,
-          data: {
-            from: this.currentUser.id,
-            to: peerId,
-            offer: pc.localDescription,
-          },
-        });
+        signal.sendOffer(this.currentChannelId, this.currentUser.id, peerId, pc.localDescription);
       } catch (e) {
         if (pc.signalingState !== 'closed') console.error('Erro ao criar WebRTC offer:', e);
       } finally {
@@ -1083,11 +911,3 @@ class WebRTCVoiceService {
 }
 
 export const webrtcVoice = new WebRTCVoiceService();
-
-export function useScreenShare(): ScreenShareSnapshot {
-  return useSyncExternalStore(webrtcVoice.subscribeScreenShare, webrtcVoice.getScreenShareSnapshot);
-}
-
-export function useInputStatus(): InputStatus {
-  return useSyncExternalStore(webrtcVoice.subscribeInputStatus, webrtcVoice.getInputStatus);
-}

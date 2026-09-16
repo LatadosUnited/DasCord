@@ -1,39 +1,21 @@
 // Por onde a voz passa: servidor de mídia (SFU), quando o servidor tem um configurado,
 // ou malha P2P entre os apps como reserva. Os componentes falam só com este arquivo.
 import { useSyncExternalStore } from 'react';
-import { User, VoiceParticipant } from '../types';
+import { User } from '../types';
 import { request } from './api';
-import { InputStatus, ScreenShareSnapshot, webrtcVoice } from './webrtc';
+import { webrtcVoice } from './webrtc';
 import { sfuVoice } from './sfuVoice';
+import {
+  EMPTY_SCREEN_SNAPSHOT,
+  InputStatus,
+  ParticipantsListener,
+  ScreenShareSnapshot,
+  VoiceCredentials,
+  VoiceEngine,
+  VoiceMode,
+} from './voiceTypes';
 
-export type VoiceMode = 'sfu' | 'p2p';
-
-/** Credenciais de entrada no canal, emitidas pelo servidor Rust */
-export interface VoiceCredentials {
-  url: string;
-  token: string;
-  room: string;
-}
-
-type ParticipantsListener = (participants: VoiceParticipant[]) => void;
-
-/** O que a fachada precisa de cada implementação de voz */
-export interface VoiceEngine {
-  leave(): void;
-  setMuted(muted: boolean): void;
-  setDeafened(deafened: boolean): void;
-  startScreenShare(): Promise<string | null>;
-  stopScreenShare(): void;
-  watchScreen(peerId: string): void;
-  stopWatchingScreen(peerId: string): void;
-  retryMicrophone(): Promise<boolean>;
-  subscribeScreenShare(cb: () => void): () => void;
-  getScreenShareSnapshot(): ScreenShareSnapshot;
-  subscribeInputStatus(cb: () => void): () => void;
-  getInputStatus(): InputStatus;
-}
-
-const EMPTY_SNAPSHOT: ScreenShareSnapshot = { local: null, viewerCount: 0, watching: [], remote: {} };
+export type { VoiceCredentials, VoiceEngine, VoiceMode } from './voiceTypes';
 
 /** 503 aqui significa "este servidor não tem SFU": a voz então usa P2P */
 const apiGetVoiceToken = (channelId: string) =>
@@ -111,7 +93,7 @@ class VoiceService {
     return () => unsubs.forEach((unsub) => unsub());
   };
 
-  getScreenShareSnapshot = (): ScreenShareSnapshot => this.engine?.getScreenShareSnapshot() ?? EMPTY_SNAPSHOT;
+  getScreenShareSnapshot = (): ScreenShareSnapshot => this.engine?.getScreenShareSnapshot() ?? EMPTY_SCREEN_SNAPSHOT;
 
   subscribeInputStatus = (cb: () => void) => {
     const unsubs = [webrtcVoice.subscribeInputStatus(cb), sfuVoice.subscribeInputStatus(cb)];
