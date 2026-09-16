@@ -179,6 +179,23 @@ CREATE TABLE message_attachments (
 CREATE INDEX idx_message_attachments_message ON message_attachments(message_id, created_at);
 ";
 
+/// v6: o anexo passa a ser guardado pelo **nome do arquivo**, não pela URL inteira.
+///
+/// Duas razões: a URL completa embutia o endereço do servidor em cada linha (trocar
+/// de domínio quebrava o que já existia) e o endereço agora é temporário e assinado,
+/// montado a cada leitura — não faz sentido guardá-lo.
+///
+/// A conversão não precisa saber qual era o domínio: corta tudo até a pasta conhecida.
+///
+/// Avatares e ícones continuam com a URL inteira de propósito: são públicos por
+/// natureza e aparecem também dentro do autor gravado em cada mensagem
+/// (`messages.author_json`), onde uma conversão alcançaria muito mais do que o ganho
+/// justifica. Trocar o domínio exige reescrever esses dois campos.
+const SCHEMA_V6: &str = "
+UPDATE message_attachments SET url = substr(url, instr(url, '/attachments/') + 13)
+    WHERE instr(url, '/attachments/') > 0;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -225,6 +242,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 5 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V5} PRAGMA user_version = 5; COMMIT;"))?;
         println!("🗄️ Banco de dados atualizado para o esquema v5 (imagens no chat).");
+    }
+    if version < 6 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V6} PRAGMA user_version = 6; COMMIT;"))?;
+        println!("🗄️ Banco de dados atualizado para o esquema v6 (arquivos sem o endereço do servidor).");
     }
     Ok(())
 }

@@ -2,7 +2,7 @@ use axum::{
     body::Bytes,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        DefaultBodyLimit, Path as AxumPath, Query, State,
+        ConnectInfo, DefaultBodyLimit, Path as AxumPath, Query, State,
     },
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::{Html, IntoResponse, Json, Response},
@@ -31,16 +31,23 @@ mod db;
 mod friends;
 mod messages;
 mod migration;
+mod policy;
+mod ratelimit;
 mod servers;
 mod sfu;
+mod signing;
 mod snowflake;
 mod voice;
 use auth::{AuthResponse, AuthStore, LoginError, LoginRequest, PublicUser, RegisterRequest};
 use db::Db;
 use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
 use messages::{
-    MessageStore, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CHANNEL_ID_LEN, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS,
+    AttachmentDto, MessageDto, MessageStore, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CHANNEL_ID_LEN,
+    MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS,
 };
+use signing::{UrlSigner, ATTACHMENT_URL_TTL_MS};
+use policy::AccessPolicy;
+use ratelimit::RateLimiter;
 use servers::{CreateInvitePayload, ServerDto, ServerError, ServerStore};
 use sfu::SfuConfig;
 use snowflake::SnowflakeGenerator;
@@ -109,6 +116,33 @@ struct AppState {
     attachments_dir: PathBuf,
     /// Endereço público do servidor, usado para montar a URL dos avatares enviados
     public_url: String,
+    /// Quem pode entrar e como o servidor enxerga o IP de quem chega
+    policy: AccessPolicy,
+    /// Assina os endereços temporários das imagens do chat
+    signer: UrlSigner,
+    /// Limites por IP: contas novas, convidados, tentativas de login e uploads
+    register_limit: RateLimiter,
+    guest_limit: RateLimiter,
+    login_limit: RateLimiter,
+    upload_limit: RateLimiter,
+}
+
+/// IP de quem fez a requisição. Atrás de proxy reverso o socket é sempre o do
+/// proxy, então o IP real vem no cabeçalho — mas só se o proxy estiver mesmo lá,
+/// senão qualquer um escolheria o próprio "IP" e passaria por cima dos limites.
+fn client_ip(state: &AppState, headers: &HeaderMap, addr: SocketAddr) -> String {
+    if state.policy.behind_proxy {
+        if let Some(first) = headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .filter(|ip| !ip.is_empty())
+        {
+            return first.to_string();
+        }
+    }
+    addr.ip().to_string()
 }
 
 #[derive(Serialize)]
@@ -199,16 +233,23 @@ async fn main() {
         icons_dir: icons_dir.clone(),
         attachments_dir: attachments_dir.clone(),
         public_url,
+        policy: AccessPolicy::from_env(),
+        signer: UrlSigner::load(data_dir),
+        register_limit: RateLimiter::new("cadastro", 5, Duration::from_secs(60 * 60)),
+        guest_limit: RateLimiter::new("entrada como convidado", 10, Duration::from_secs(60 * 60)),
+        login_limit: RateLimiter::new("tentativas de login", 20, Duration::from_secs(15 * 60)),
+        upload_limit: RateLimiter::new("envio de imagens", 60, Duration::from_secs(60 * 60)),
     });
 
     // Imagens escolhidas mas nunca enviadas não ficam ocupando disco para sempre
     match state.messages.purge_orphan_attachments(ORPHAN_ATTACHMENT_MAX_AGE_MS) {
-        Ok(urls) if !urls.is_empty() => {
-            let prefix = format!("{}/attachments/", state.public_url);
-            for url in &urls {
-                remove_replaced_upload(&attachments_dir, &prefix, url).await;
+        Ok(file_names) if !file_names.is_empty() => {
+            for file_name in &file_names {
+                if let Some(path) = safe_attachment_path(&attachments_dir, file_name) {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
             }
-            println!("🧹 {} imagem(ns) enviada(s) e nunca postada(s) foram descartadas.", urls.len());
+            println!("🧹 {} imagem(ns) enviada(s) e nunca postada(s) foram descartadas.", file_names.len());
         }
         Ok(_) => {}
         Err(e) => eprintln!("⚠️ Falha ao limpar anexos órfãos: {}", e),
@@ -254,9 +295,11 @@ async fn main() {
         .route("/api/voice/token", get(voice_token_handler))
         .route("/api/servers/{server_id}/invites", post(create_invite_handler))
         .route("/api/invites/{code}/accept", post(accept_invite_handler))
+        // Avatares e ícones continuam abertos: são públicos por natureza.
+        // As imagens do chat, não — elas saem por /api/attachments/{id}, com endereço assinado.
         .nest_service("/avatars", ServeDir::new(&avatars_dir))
         .nest_service("/icons", ServeDir::new(&icons_dir))
-        .nest_service("/attachments", ServeDir::new(&attachments_dir))
+        .route("/api/attachments/{attachment_id}", get(attachment_handler))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -268,7 +311,8 @@ async fn main() {
         .await
         .expect("Failed to bind TCP listener");
 
-    axum::serve(listener, app)
+    // with_connect_info: sem isso o servidor não enxerga o IP de quem chega
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .expect("Server failed to run");
 }
@@ -291,9 +335,16 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse
     })
 }
 
-/// Versão do servidor e a mínima do app. Sem autenticação: o app confere antes do login.
-async fn version_handler() -> Json<serde_json::Value> {
-    Json(json!({ "version": SERVER_VERSION, "minClientVersion": MIN_CLIENT_VERSION }))
+/// Versão do servidor e a mínima do app, mais as regras de entrada, para a tela
+/// de login não oferecer o que este servidor não aceita.
+/// Sem autenticação: o app confere antes do login.
+async fn version_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(json!({
+        "version": SERVER_VERSION,
+        "minClientVersion": MIN_CLIENT_VERSION,
+        "requireInvite": state.policy.require_invite,
+        "allowGuests": state.policy.allow_guests,
+    }))
 }
 
 async fn snowflake_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -334,8 +385,32 @@ fn auth_failure(status: StatusCode, error: String) -> (StatusCode, Json<AuthResp
 // Handler de Registro de Usuário
 async fn register_handler(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<RegisterRequest>,
 ) -> impl IntoResponse {
+    let ip = client_ip(&state, &headers, addr);
+    if !state.register_limit.check(&ip) {
+        return auth_failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Muitas contas criadas deste endereço. Tente de novo mais tarde.".to_string(),
+        );
+    }
+
+    // O convite é conferido antes de criar qualquer coisa, e só é consumido no fim
+    let invite = payload.invite_code.clone().filter(|code| !code.trim().is_empty());
+    if state.policy.require_invite {
+        let Some(code) = invite.as_deref() else {
+            return auth_failure(
+                StatusCode::FORBIDDEN,
+                "Este servidor é fechado: você precisa de um convite para criar uma conta.".to_string(),
+            );
+        };
+        if state.servers.peek_invite(code).is_err() {
+            return auth_failure(StatusCode::FORBIDDEN, "Convite inválido ou expirado.".to_string());
+        }
+    }
+
     // argon2 é CPU-bound: roda fora das threads do runtime async
     let st = state.clone();
     let result = tokio::task::spawn_blocking(move || st.auth.register(payload, &st.snowflake)).await;
@@ -343,6 +418,14 @@ async fn register_handler(
     match result {
         Ok(Ok((token, user))) => {
             welcome_to_default_servers(&state, &user);
+            // Quem chegou por convite entra no servidor de quem convidou
+            if let Some(code) = invite.as_deref() {
+                match state.servers.accept_invite(code, &user.id) {
+                    Ok((server, joined)) if joined => publish_member_joined(&state, &server.id, &user),
+                    Ok(_) => {}
+                    Err(_) => eprintln!("⚠️ Conta criada, mas o convite não pôde ser usado: {}", code),
+                }
+            }
             auth_success(StatusCode::CREATED, token, user)
         }
         Ok(Err(err)) => auth_failure(StatusCode::BAD_REQUEST, err),
@@ -353,8 +436,20 @@ async fn register_handler(
 // Handler de Login
 async fn login_handler(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    // Limite por IP além do limite por conta: um não substitui o outro.
+    // Por conta, protege a senha; por IP, impede varrer várias contas de um lugar só.
+    let ip = client_ip(&state, &headers, addr);
+    if !state.login_limit.check(&ip) {
+        return auth_failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Muitas tentativas deste endereço. Aguarde alguns minutos.".to_string(),
+        );
+    }
+
     let st = state.clone();
     let result = tokio::task::spawn_blocking(move || st.auth.login(payload)).await;
 
@@ -368,7 +463,25 @@ async fn login_handler(
 }
 
 // Handler de Sessão de Convidado (expira em 24h)
-async fn guest_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn guest_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !state.policy.allow_guests {
+        return auth_failure(
+            StatusCode::FORBIDDEN,
+            "Este servidor não aceita convidados. Peça um convite para criar uma conta.".to_string(),
+        );
+    }
+    let ip = client_ip(&state, &headers, addr);
+    if !state.guest_limit.check(&ip) {
+        return auth_failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Muitas entradas como convidado deste endereço. Tente de novo mais tarde.".to_string(),
+        );
+    }
+
     match state.auth.create_guest(&state.snowflake) {
         Ok((token, user)) => {
             welcome_to_default_servers(&state, &user);
@@ -546,6 +659,7 @@ fn image_extension(bytes: &[u8]) -> Option<&'static str> {
 
 async fn upload_avatar_handler(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> JsonReply {
@@ -553,6 +667,9 @@ async fn upload_avatar_handler(
         Ok(session) => session,
         Err(reply) => return reply,
     };
+    if !state.upload_limit.check(&client_ip(&state, &headers, addr)) {
+        return json_error(StatusCode::TOO_MANY_REQUESTS, "Muitos envios deste endereço. Aguarde um pouco.");
+    }
     if state.auth.is_guest(&user_id) {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -606,6 +723,89 @@ async fn remove_replaced_upload(dir: &Path, public_prefix: &str, old_url: &str) 
     }
 }
 
+/// Caminho do arquivo dentro da pasta de anexos, ou None se o nome tentar sair dela
+fn safe_attachment_path(dir: &Path, file_name: &str) -> Option<PathBuf> {
+    if file_name.is_empty() || file_name.contains(['/', '\\']) || file_name.contains("..") {
+        return None;
+    }
+    Some(dir.join(file_name))
+}
+
+/// Endereço temporário de um anexo. Vale por poucos minutos e não serve para mais nada:
+/// quem o recebe já teve o acesso ao canal conferido aqui.
+fn sign_attachment(state: &AppState, attachment: &mut AttachmentDto, expires_at: i64) {
+    let signature = state.signer.sign(&attachment.id, expires_at);
+    attachment.url = format!(
+        "{}/api/attachments/{}?expires={}&sig={}",
+        state.public_url, attachment.id, expires_at, signature
+    );
+}
+
+/// Troca os nomes de arquivo pelos endereços assinados, logo antes de a mensagem
+/// sair para o app — pelo histórico ou pelo WebSocket.
+fn sign_message_attachments(state: &AppState, message: &mut MessageDto) {
+    if message.attachments.is_empty() {
+        return;
+    }
+    let expires_at = db::now_ms() + ATTACHMENT_URL_TTL_MS;
+    for attachment in message.attachments.iter_mut() {
+        sign_attachment(state, attachment, expires_at);
+    }
+}
+
+#[derive(Deserialize)]
+struct SignedAttachmentQuery {
+    expires: i64,
+    sig: String,
+}
+
+/// Entrega a imagem a quem chega com um endereço assinado e dentro da validade.
+/// Sem `ServeDir`: acertar (ou adivinhar) o nome do arquivo não basta mais.
+async fn attachment_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(attachment_id): AxumPath<String>,
+    Query(query): Query<SignedAttachmentQuery>,
+) -> Response {
+    let not_found = || (StatusCode::NOT_FOUND, "Anexo não encontrado.").into_response();
+
+    if !state.signer.verify(&attachment_id, query.expires, &query.sig, db::now_ms()) {
+        return (StatusCode::FORBIDDEN, "Endereço expirado ou inválido.").into_response();
+    }
+    let Ok(Some(source)) = state.messages.attachment_source(&attachment_id) else {
+        return not_found();
+    };
+    let Some(path) = safe_attachment_path(&state.attachments_dir, &source.file_name) else {
+        return not_found();
+    };
+    let Ok(bytes) = tokio::fs::read(&path).await else {
+        return not_found();
+    };
+
+    // O nome original é do usuário: só o que é seguro em cabeçalho continua nele
+    let safe_name: String = source
+        .name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .collect();
+    let disposition = if safe_name.trim().is_empty() {
+        "inline".to_string()
+    } else {
+        format!("inline; filename=\"{}\"", safe_name.trim())
+    };
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, source.content_type),
+            (header::CONTENT_DISPOSITION, disposition),
+            // Privado: o endereço é de uma pessoa só, e some com a validade
+            (header::CACHE_CONTROL, "private, max-age=600".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 #[derive(Deserialize)]
 struct AttachmentQuery {
     /// Nome original do arquivo, só para exibição
@@ -619,6 +819,7 @@ async fn upload_attachment_handler(
     State(state): State<Arc<AppState>>,
     AxumPath(channel_id): AxumPath<String>,
     Query(query): Query<AttachmentQuery>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> JsonReply {
@@ -626,6 +827,12 @@ async fn upload_attachment_handler(
         Ok(session) => session,
         Err(reply) => return reply,
     };
+    if !state.upload_limit.check(&client_ip(&state, &headers, addr)) {
+        return json_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Muitas imagens enviadas deste endereço. Aguarde um pouco.",
+        );
+    }
     if channel_id.len() > MAX_CHANNEL_ID_LEN || channel_target(&state, &user_id, &channel_id).is_none() {
         return json_error(StatusCode::FORBIDDEN, "Sem acesso a este canal.");
     }
@@ -646,17 +853,21 @@ async fn upload_attachment_handler(
     let display_name = query.name.chars().take(120).collect::<String>();
     let display_name = if display_name.trim().is_empty() { file_name.clone() } else { display_name };
 
-    let url = format!("{}/attachments/{}", state.public_url, file_name);
     match state.messages.create_attachment(
         &channel_id,
         &user_id,
-        &url,
+        &file_name,
         &display_name,
         content_type,
         size,
         &state.snowflake,
     ) {
-        Ok(attachment) => (StatusCode::CREATED, Json(json!({ "success": true, "attachment": attachment }))),
+        Ok(mut attachment) => {
+            // A pré-visualização no app usa o arquivo local; este endereço é o
+            // que vai junto da mensagem quando ela for enviada.
+            sign_attachment(&state, &mut attachment, db::now_ms() + ATTACHMENT_URL_TTL_MS);
+            (StatusCode::CREATED, Json(json!({ "success": true, "attachment": attachment })))
+        }
         Err(err) => {
             let _ = tokio::fs::remove_file(&file_path).await;
             json_error(StatusCode::INTERNAL_SERVER_ERROR, &err)
@@ -700,8 +911,13 @@ fn publish_member_joined(state: &AppState, server_id: &str, user: &PublicUser) {
     publish_to_server(state, server_id, event);
 }
 
-/// Toda conta e todo convidado novo entra no DasIdeia HQ
+/// Toda conta e todo convidado novo entra no DasIdeia HQ.
+/// Numa instalação fechada isso é desligado: quem chega entra só no servidor
+/// de quem o convidou.
 fn welcome_to_default_servers(state: &AppState, user: &PublicUser) {
+    if !state.policy.auto_join_default {
+        return;
+    }
     for server_id in state.servers.join_default_servers(&user.id) {
         publish_member_joined(state, &server_id, user);
     }
@@ -772,6 +988,7 @@ async fn rename_server_handler(
 async fn upload_server_icon_handler(
     State(state): State<Arc<AppState>>,
     AxumPath(server_id): AxumPath<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> JsonReply {
@@ -779,6 +996,9 @@ async fn upload_server_icon_handler(
         Ok(session) => session,
         Err(reply) => return reply,
     };
+    if !state.upload_limit.check(&client_ip(&state, &headers, addr)) {
+        return json_error(StatusCode::TOO_MANY_REQUESTS, "Muitos envios deste endereço. Aguarde um pouco.");
+    }
     // Confere a permissão antes de gravar qualquer arquivo (e garante que o ID existe no banco)
     if let Err(err) = state.servers.require_owner(&server_id, &user_id) {
         return server_error(err);
@@ -1053,7 +1273,12 @@ async fn channel_messages_handler(
 
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     match state.messages.history(&channel_id, query.before, limit) {
-        Ok(messages) => (StatusCode::OK, Json(json!({ "messages": messages }))),
+        Ok(mut messages) => {
+            for message in messages.iter_mut() {
+                sign_message_attachments(&state, message);
+            }
+            (StatusCode::OK, Json(json!({ "messages": messages })))
+        }
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))),
     }
 }
@@ -1369,7 +1594,7 @@ fn handle_client_event(
             let nonce = event["data"].get("id").and_then(|n| n.as_str()).map(str::to_string);
             let reply_to = event["data"].get("replyToId").and_then(|r| r.as_str()).map(str::to_string);
 
-            let saved = match state.messages.insert(
+            let mut saved = match state.messages.insert(
                 &channel_id,
                 user,
                 &content,
@@ -1380,6 +1605,7 @@ fn handle_client_event(
                 Ok(saved) => saved,
                 Err(_) => return,
             };
+            sign_message_attachments(state, &mut saved);
             let mut data = json!(saved);
             if let Some(nonce) = nonce {
                 data["nonce"] = json!(nonce);
@@ -1410,9 +1636,10 @@ fn handle_client_event(
             if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
                 return;
             }
-            let Ok(Some(updated)) = state.messages.edit(&channel_id, &message_id, &user.id, &content) else {
+            let Ok(Some(mut updated)) = state.messages.edit(&channel_id, &message_id, &user.id, &content) else {
                 return;
             };
+            sign_message_attachments(state, &mut updated);
             event["type"] = json!("message-updated");
             event["data"] = json!(updated);
             target

@@ -442,6 +442,29 @@ impl ServerStore {
         Err(ServerError::Internal("Não foi possível gerar o convite. Tente de novo.".to_string()))
     }
 
+    /// Confere se o convite existe e ainda vale, **sem** consumir um uso.
+    /// Serve para recusar um cadastro antes de criar a conta.
+    pub fn peek_invite(&self, input: &str) -> Result<(), ServerError> {
+        let code = parse_invite_code(input).ok_or(ServerError::NotFound(INVITE_NOT_FOUND))?;
+        let conn = self.db.conn();
+        let invite: Option<(Option<i64>, Option<i64>, i64)> = conn
+            .query_row(
+                "SELECT expires_at, max_uses, uses FROM invites WHERE code = ?1",
+                [&code],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((expires_at, max_uses, uses)) = invite else {
+            return Err(ServerError::NotFound(INVITE_NOT_FOUND));
+        };
+        let expired = expires_at.is_some_and(|at| at <= now_ms());
+        let used_up = max_uses.is_some_and(|max| uses >= max);
+        if expired || used_up {
+            return Err(ServerError::NotFound(INVITE_NOT_FOUND));
+        }
+        Ok(())
+    }
+
     /// Entra no servidor do convite. Devolve o servidor e se o usuário acabou de entrar
     /// (false quando já era membro: nesse caso o convite não é consumido).
     pub fn accept_invite(&self, input: &str, user_id: &str) -> Result<(ServerDto, bool), ServerError> {

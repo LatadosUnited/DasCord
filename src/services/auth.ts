@@ -8,6 +8,8 @@ export interface RegisterPayload {
   username: string;
   displayName?: string;
   password: string;
+  /** Código ou link de convite; obrigatório nos servidores fechados */
+  inviteCode?: string;
 }
 
 export interface LoginPayload {

@@ -214,6 +214,7 @@ dependencies = [
  "axum",
  "futures",
  "hex",
+ "hmac",
  "livekit-api",
  "rusqlite",
  "serde",
