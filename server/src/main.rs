@@ -38,7 +38,9 @@ mod voice;
 use auth::{AuthResponse, AuthStore, LoginError, LoginRequest, PublicUser, RegisterRequest};
 use db::Db;
 use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
-use messages::{MessageStore, MAX_CHANNEL_ID_LEN, MAX_MESSAGE_CHARS};
+use messages::{
+    MessageStore, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CHANNEL_ID_LEN, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS,
+};
 use servers::{CreateInvitePayload, ServerDto, ServerError, ServerStore};
 use sfu::SfuConfig;
 use snowflake::SnowflakeGenerator;
@@ -58,6 +60,10 @@ const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_CLIENT_VERSION: &str = "0.2.0";
 /// Limite de avatares e ícones de servidor
 const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+/// Limite das imagens enviadas no chat, que podem ser bem maiores que um avatar
+const MAX_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
+/// Upload que não virou mensagem nesse tempo é descartado na subida do servidor
+const ORPHAN_ATTACHMENT_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Destinatários de um evento publicado no canal de broadcast.
 /// Não existe "todos": cada evento diz exatamente quem pode recebê-lo.
@@ -100,6 +106,7 @@ struct AppState {
     next_conn_id: AtomicU64,
     avatars_dir: PathBuf,
     icons_dir: PathBuf,
+    attachments_dir: PathBuf,
     /// Endereço público do servidor, usado para montar a URL dos avatares enviados
     public_url: String,
 }
@@ -165,6 +172,8 @@ async fn main() {
     std::fs::create_dir_all(&avatars_dir).expect("Falha ao criar a pasta de avatares");
     let icons_dir = data_dir.join("icons");
     std::fs::create_dir_all(&icons_dir).expect("Falha ao criar a pasta de ícones de servidor");
+    let attachments_dir = data_dir.join("attachments");
+    std::fs::create_dir_all(&attachments_dir).expect("Falha ao criar a pasta de anexos");
     let public_url = std::env::var("DASCORD_PUBLIC_URL")
         .unwrap_or_else(|_| format!("http://localhost:{}", addr.port()))
         .trim_end_matches('/')
@@ -188,8 +197,22 @@ async fn main() {
         next_conn_id: AtomicU64::new(1),
         avatars_dir: avatars_dir.clone(),
         icons_dir: icons_dir.clone(),
+        attachments_dir: attachments_dir.clone(),
         public_url,
     });
+
+    // Imagens escolhidas mas nunca enviadas não ficam ocupando disco para sempre
+    match state.messages.purge_orphan_attachments(ORPHAN_ATTACHMENT_MAX_AGE_MS) {
+        Ok(urls) if !urls.is_empty() => {
+            let prefix = format!("{}/attachments/", state.public_url);
+            for url in &urls {
+                remove_replaced_upload(&attachments_dir, &prefix, url).await;
+            }
+            println!("🧹 {} imagem(ns) enviada(s) e nunca postada(s) foram descartadas.", urls.len());
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("⚠️ Falha ao limpar anexos órfãos: {}", e),
+    }
 
     let app = Router::new()
         .route("/", get(root_handler))
@@ -206,6 +229,10 @@ async fn main() {
         .route("/api/friends/accept", post(accept_friend_request_handler))
         .route("/api/friends/decline", post(decline_friend_request_handler))
         .route("/api/channels/{channel_id}/messages", get(channel_messages_handler))
+        .route(
+            "/api/channels/{channel_id}/attachments",
+            post(upload_attachment_handler).layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BYTES)),
+        )
         .route("/api/users/me/profile", patch(update_profile_handler))
         .route("/api/users/me/presence", patch(update_presence_handler))
         .route(
@@ -229,6 +256,7 @@ async fn main() {
         .route("/api/invites/{code}/accept", post(accept_invite_handler))
         .nest_service("/avatars", ServeDir::new(&avatars_dir))
         .nest_service("/icons", ServeDir::new(&icons_dir))
+        .nest_service("/attachments", ServeDir::new(&attachments_dir))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -574,6 +602,64 @@ async fn remove_replaced_upload(dir: &Path, public_prefix: &str, old_url: &str) 
     if let Some(old_file) = old_url.strip_prefix(public_prefix) {
         if !old_file.is_empty() && !old_file.contains(['/', '\\']) && !old_file.contains("..") {
             let _ = tokio::fs::remove_file(dir.join(old_file)).await;
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AttachmentQuery {
+    /// Nome original do arquivo, só para exibição
+    #[serde(default)]
+    name: String,
+}
+
+/// Recebe uma imagem para um canal. Ela fica guardada sem mensagem até o app
+/// enviar a mensagem que a cita, e some sozinha se isso nunca acontecer.
+async fn upload_attachment_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(channel_id): AxumPath<String>,
+    Query(query): Query<AttachmentQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> JsonReply {
+    let (_, user_id) = match require_session(&state, &headers) {
+        Ok(session) => session,
+        Err(reply) => return reply,
+    };
+    if channel_id.len() > MAX_CHANNEL_ID_LEN || channel_target(&state, &user_id, &channel_id).is_none() {
+        return json_error(StatusCode::FORBIDDEN, "Sem acesso a este canal.");
+    }
+
+    let size = body.len() as i64;
+    let (file_name, file_path) =
+        match save_uploaded_image(&state.attachments_dir, &user_id, &state.snowflake, &body).await {
+            Ok(saved) => saved,
+            Err(reply) => return reply,
+        };
+    let content_type = match file_name.rsplit('.').next() {
+        Some("png") => "image/png",
+        Some("jpg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        _ => "image/webp",
+    };
+    // O nome vem do cliente: serve só de rótulo, nunca de caminho no disco
+    let display_name = query.name.chars().take(120).collect::<String>();
+    let display_name = if display_name.trim().is_empty() { file_name.clone() } else { display_name };
+
+    let url = format!("{}/attachments/{}", state.public_url, file_name);
+    match state.messages.create_attachment(
+        &channel_id,
+        &user_id,
+        &url,
+        &display_name,
+        content_type,
+        size,
+        &state.snowflake,
+    ) {
+        Ok(attachment) => (StatusCode::CREATED, Json(json!({ "success": true, "attachment": attachment }))),
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&file_path).await;
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, &err)
         }
     }
 }
@@ -1265,13 +1351,32 @@ fn handle_client_event(
                 .and_then(|c| c.as_str())
                 .map(|c| c.trim().to_string())
                 .unwrap_or_default();
-            if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+            // Imagens enviadas antes da mensagem; com elas, o texto pode vir vazio
+            let attachment_ids: Vec<String> = event["data"]
+                .get("attachmentIds")
+                .and_then(|a| a.as_array())
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_str().map(str::to_string))
+                        .take(MAX_ATTACHMENTS_PER_MESSAGE)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if (content.is_empty() && attachment_ids.is_empty()) || content.chars().count() > MAX_MESSAGE_CHARS {
                 return;
             }
             // O ID do cliente vira "nonce", para ele trocar a mensagem otimista pela oficial
             let nonce = event["data"].get("id").and_then(|n| n.as_str()).map(str::to_string);
+            let reply_to = event["data"].get("replyToId").and_then(|r| r.as_str()).map(str::to_string);
 
-            let saved = match state.messages.insert(&channel_id, user, &content, &state.snowflake) {
+            let saved = match state.messages.insert(
+                &channel_id,
+                user,
+                &content,
+                reply_to.as_deref(),
+                &attachment_ids,
+                &state.snowflake,
+            ) {
                 Ok(saved) => saved,
                 Err(_) => return,
             };
@@ -1282,11 +1387,80 @@ fn handle_client_event(
             event["data"] = data;
             target
         }
-        "typing" | "reaction" => {
+        "typing" => {
             let Some(target) = channel_target(state, &user.id, &channel_id) else {
                 return;
             };
-            event["data"]["userId"] = json!(user.id);
+            event["data"] = json!({ "userId": user.id, "name": user.name });
+            target
+        }
+        // Só o autor edita; o texto novo passa pelas mesmas regras do envio
+        "message-edit" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
+            let Some(message_id) = event["data"].get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+                return;
+            };
+            let content = event["data"]
+                .get("content")
+                .and_then(|c| c.as_str())
+                .map(|c| c.trim().to_string())
+                .unwrap_or_default();
+            if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+                return;
+            }
+            let Ok(Some(updated)) = state.messages.edit(&channel_id, &message_id, &user.id, &content) else {
+                return;
+            };
+            event["type"] = json!("message-updated");
+            event["data"] = json!(updated);
+            target
+        }
+        // O autor apaga a própria mensagem; o dono do servidor apaga a de qualquer um
+        "message-delete" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
+            let Some(message_id) = event["data"].get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+                return;
+            };
+            let can_moderate = state
+                .servers
+                .channel_server_id(&channel_id)
+                .is_some_and(|server_id| state.servers.require_owner(&server_id, &user.id).is_ok());
+            match state.messages.delete(&channel_id, &message_id, &user.id, can_moderate) {
+                Ok(true) => {}
+                _ => return,
+            }
+            event["type"] = json!("message-deleted");
+            event["data"] = json!({ "id": message_id });
+            target
+        }
+        // Põe ou tira a própria reação; todos recebem a lista nova de quem reagiu
+        "reaction" => {
+            let Some(target) = channel_target(state, &user.id, &channel_id) else {
+                return;
+            };
+            let Some(message_id) = event["data"].get("messageId").and_then(|v| v.as_str()).map(str::to_string) else {
+                return;
+            };
+            let emoji = event["data"]
+                .get("emoji")
+                .and_then(|e| e.as_str())
+                .map(|e| e.trim().to_string())
+                .unwrap_or_default();
+            if emoji.is_empty() || emoji.chars().count() > MAX_EMOJI_CHARS {
+                return;
+            }
+            let Ok(Some(reaction)) = state.messages.toggle_reaction(&channel_id, &message_id, &user.id, &emoji) else {
+                return;
+            };
+            event["data"] = json!({
+                "messageId": message_id,
+                "emoji": reaction.emoji,
+                "userIds": reaction.user_ids,
+            });
             target
         }
         "voice-join" => {

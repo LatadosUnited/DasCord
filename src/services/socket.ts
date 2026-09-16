@@ -4,6 +4,11 @@ import { WS_URL } from './config';
 export interface SocketEvent {
   type:
     | 'message'
+    // Enviados pelo app; o servidor responde com message-updated / message-deleted
+    | 'message-edit'
+    | 'message-delete'
+    | 'message-updated'
+    | 'message-deleted'
     | 'reaction'
     | 'typing'
     | 'friend-request-received'

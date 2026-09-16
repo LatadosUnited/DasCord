@@ -143,6 +143,42 @@ INSERT INTO server_members (server_id, user_id, joined_at)
     SELECT 's-dasideia', id, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM guests;
 ";
 
+/// v4: mensagens editadas, apagadas, respostas e reações salvas.
+/// deleted_at preenchido: a mensagem some do histórico, mas continua servindo
+/// de referência para quem respondeu a ela.
+const SCHEMA_V4: &str = "
+ALTER TABLE messages ADD COLUMN edited_at INTEGER;
+ALTER TABLE messages ADD COLUMN deleted_at INTEGER;
+ALTER TABLE messages ADD COLUMN reply_to_id TEXT;
+
+CREATE TABLE message_reactions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE INDEX idx_message_reactions_message ON message_reactions(message_id, created_at);
+";
+
+/// v5: imagens enviadas no chat.
+/// message_id fica NULL entre o upload e o envio da mensagem; um upload
+/// abandonado (a pessoa desistiu) fica órfão e é limpo na subida do servidor.
+const SCHEMA_V5: &str = "
+CREATE TABLE message_attachments (
+    id           TEXT PRIMARY KEY,
+    message_id   TEXT REFERENCES messages(id) ON DELETE CASCADE,
+    channel_id   TEXT NOT NULL,
+    uploaded_by  TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_message_attachments_message ON message_attachments(message_id, created_at);
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -181,6 +217,14 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 3 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V3} PRAGMA user_version = 3; COMMIT;"))?;
         println!("🗄️ Banco de dados atualizado para o esquema v3 (servidores e convites).");
+    }
+    if version < 4 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V4} PRAGMA user_version = 4; COMMIT;"))?;
+        println!("🗄️ Banco de dados atualizado para o esquema v4 (edição, respostas e reações).");
+    }
+    if version < 5 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V5} PRAGMA user_version = 5; COMMIT;"))?;
+        println!("🗄️ Banco de dados atualizado para o esquema v5 (imagens no chat).");
     }
     Ok(())
 }

@@ -28,13 +28,27 @@ export interface Channel {
 
 export interface Reaction {
   emoji: string;
-  count: number;
-  active: boolean;
+  /** Quem reagiu: a reação aparece como sua quando o seu ID está na lista */
+  userIds: string[];
+}
+
+/** Resumo da mensagem respondida, mostrado acima da resposta */
+export interface MessageReply {
+  id: string;
+  authorName: string;
+  content: string;
+  deleted: boolean;
 }
 
 export interface Attachment {
   type: 'image' | 'code';
+  /** Só nas imagens enviadas: identifica o anexo no servidor */
+  id?: string;
   url?: string;
+  /** Nome original do arquivo, mostrado no lugar da imagem que não carregar */
+  name?: string;
+  contentType?: string;
+  size?: number;
   title?: string;
   language?: string;
   code?: string;
@@ -50,6 +64,9 @@ export interface Message {
   attachments?: Attachment[];
   /** Momento de criação em ms; ausente nas mensagens de exemplo (mockData) */
   createdAt?: number;
+  /** Preenchido depois de uma edição; o app mostra "(editada)" */
+  editedAt?: number;
+  replyTo?: MessageReply;
   /** ID local da mensagem otimista que esta mensagem do servidor substitui */
   nonce?: string;
 }
