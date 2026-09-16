@@ -28,8 +28,16 @@ export interface Channel {
 
 export interface Reaction {
   emoji: string;
-  count: number;
-  active: boolean;
+  /** Quem reagiu: a reação aparece como sua quando o seu ID está na lista */
+  userIds: string[];
+}
+
+/** Resumo da mensagem respondida, mostrado acima da resposta */
+export interface MessageReply {
+  id: string;
+  authorName: string;
+  content: string;
+  deleted: boolean;
 }
 
 export interface Attachment {
@@ -50,6 +58,9 @@ export interface Message {
   attachments?: Attachment[];
   /** Momento de criação em ms; ausente nas mensagens de exemplo (mockData) */
   createdAt?: number;
+  /** Preenchido depois de uma edição; o app mostra "(editada)" */
+  editedAt?: number;
+  replyTo?: MessageReply;
   /** ID local da mensagem otimista que esta mensagem do servidor substitui */
   nonce?: string;
 }

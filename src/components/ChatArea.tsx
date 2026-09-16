@@ -1,15 +1,43 @@
 import { useState, useRef, useEffect, FC } from 'react';
-import { Hash, AtSign, Phone, Video, Bell, Pin, Users, Search, PlusCircle, Smile, Send } from 'lucide-react';
+import {
+  Hash,
+  AtSign,
+  Phone,
+  Video,
+  Bell,
+  Pin,
+  Users,
+  Search,
+  PlusCircle,
+  Smile,
+  Send,
+  Reply,
+  Pencil,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { Channel, Message, User } from '../types';
+import { ConfirmDialog } from './ConfirmDialog';
 import './ChatArea.css';
+
+/** Reações rápidas da barra de ações */
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀'];
 
 interface ChatAreaProps {
   channel: Channel | undefined;
   messages: Message[];
   currentUser?: User;
   dmUser?: User;
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, replyToId?: string) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
+  onDeleteMessage: (messageId: string) => void;
+  /** Chamado a cada digitação; quem envia decide a frequência real no socket */
+  onTyping: () => void;
+  /** Nomes de quem está digitando agora neste canal */
+  typingNames: string[];
+  /** Dono do servidor: pode apagar mensagem de qualquer um */
+  canModerate?: boolean;
   showMemberList: boolean;
   onToggleMemberList: () => void;
 }
@@ -17,23 +45,43 @@ interface ChatAreaProps {
 export const ChatArea: FC<ChatAreaProps> = ({
   channel,
   messages,
+  currentUser,
   dmUser,
   onSendMessage,
   onToggleReaction,
+  onEditMessage,
+  onDeleteMessage,
+  onTyping,
+  typingNames,
+  canModerate,
   showMemberList,
   onToggleMemberList,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [replyTo, setReplyTo] = useState<{ id: string; authorName: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Trocar de canal descarta resposta e edição pendentes daquele canal
+  useEffect(() => {
+    setReplyTo(null);
+    setEditing(null);
+    setPickerFor(null);
+    setDeletingId(null);
+  }, [channel?.id]);
+
   const handleSend = () => {
     if (inputText.trim()) {
-      onSendMessage(inputText.trim());
+      onSendMessage(inputText.trim(), replyTo?.id);
       setInputText('');
+      setReplyTo(null);
     }
   };
 
@@ -41,10 +89,46 @@ export const ChatArea: FC<ChatAreaProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    } else if (e.key === 'Escape' && replyTo) {
+      setReplyTo(null);
+    }
+  };
+
+  const startReply = (msg: Message) => {
+    setReplyTo({ id: msg.id, authorName: msg.author.name });
+    setEditing(null);
+    inputRef.current?.focus();
+  };
+
+  const saveEdit = () => {
+    if (!editing) return;
+    const text = editing.text.trim();
+    const original = messages.find((m) => m.id === editing.id);
+    if (text && text !== original?.content) {
+      onEditMessage(editing.id, text);
+    }
+    setEditing(null);
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      setEditing(null);
     }
   };
 
   const channelName = channel ? channel.name : 'geral';
+  const deletingMessage = messages.find((m) => m.id === deletingId);
+  const typingLabel =
+    typingNames.length === 1
+      ? `${typingNames[0]} está digitando...`
+      : typingNames.length > 1 && typingNames.length < 4
+        ? `${typingNames.slice(0, -1).join(', ')} e ${typingNames[typingNames.length - 1]} estão digitando...`
+        : typingNames.length >= 4
+          ? 'Várias pessoas estão digitando...'
+          : '';
 
   return (
     <div className="chat-area">
@@ -130,70 +214,174 @@ export const ChatArea: FC<ChatAreaProps> = ({
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className="message-item">
-            <img src={msg.author.avatar} alt={msg.author.name} className="message-avatar" />
-            <div className="message-content-wrapper">
-              <div className="message-header">
-                {/* A cor do cargo é um dado do usuário */}
-                <span className="message-author" style={{ color: msg.author.roleColor }}>
-                  {msg.author.name}
-                </span>
-                {msg.author.isBot && <span className="bot-tag">BOT</span>}
-                <span className="message-timestamp">{msg.timestamp}</span>
-              </div>
+        {messages.map((msg) => {
+          const isOwn = currentUser?.id === msg.author.id;
+          // Mensagem ainda sem confirmação do servidor não aceita edição nem reação
+          const isSaved = msg.createdAt !== undefined && msg.timestamp !== 'Enviando...';
 
-              <div className="message-text">
-                {/* Parse simples de negrito */}
-                {msg.content.split('**').map((chunk, i) => (i % 2 === 1 ? <strong key={i}>{chunk}</strong> : chunk))}
-              </div>
-
-              {msg.attachments?.map((att, idx) =>
-                att.type === 'code' && att.code ? (
-                  <div key={idx} className="message-code-block">
-                    <div className="code-block-header">
-                      <span>{att.title || 'Rust Code'}</span>
-                      <span>{att.language || 'rust'}</span>
-                    </div>
-                    <pre className="code-content">
-                      <code>{att.code}</code>
-                    </pre>
+          return (
+            <div key={msg.id} className="message-item">
+              <img src={msg.author.avatar} alt={msg.author.name} className="message-avatar" />
+              <div className="message-content-wrapper">
+                {msg.replyTo && (
+                  <div className="message-reply-context">
+                    <Reply size={13} />
+                    <span className="message-reply-author">{msg.replyTo.authorName || 'Alguém'}</span>
+                    <span className={`message-reply-text ${msg.replyTo.deleted ? 'deleted' : ''}`}>
+                      {msg.replyTo.deleted ? 'mensagem apagada' : msg.replyTo.content}
+                    </span>
                   </div>
-                ) : null
+                )}
+
+                <div className="message-header">
+                  {/* A cor do cargo é um dado do usuário */}
+                  <span className="message-author" style={{ color: msg.author.roleColor }}>
+                    {msg.author.name}
+                  </span>
+                  {msg.author.isBot && <span className="bot-tag">BOT</span>}
+                  <span className="message-timestamp">{msg.timestamp}</span>
+                </div>
+
+                {editing?.id === msg.id ? (
+                  <>
+                    <input
+                      type="text"
+                      className="message-edit-field"
+                      value={editing.text}
+                      autoFocus
+                      onChange={(e) => setEditing({ id: msg.id, text: e.target.value })}
+                      onKeyDown={handleEditKeyDown}
+                    />
+                    <div className="message-edit-hint">
+                      <strong>Esc</strong> cancela · <strong>Enter</strong> salva
+                    </div>
+                  </>
+                ) : (
+                  <div className="message-text">
+                    {/* Parse simples de negrito */}
+                    {msg.content.split('**').map((chunk, i) => (i % 2 === 1 ? <strong key={i}>{chunk}</strong> : chunk))}
+                    {msg.editedAt && <span className="message-edited-tag">(editada)</span>}
+                  </div>
+                )}
+
+                {msg.attachments?.map((att, idx) =>
+                  att.type === 'code' && att.code ? (
+                    <div key={idx} className="message-code-block">
+                      <div className="code-block-header">
+                        <span>{att.title || 'Rust Code'}</span>
+                        <span>{att.language || 'rust'}</span>
+                      </div>
+                      <pre className="code-content">
+                        <code>{att.code}</code>
+                      </pre>
+                    </div>
+                  ) : null
+                )}
+
+                {msg.reactions && msg.reactions.length > 0 && (
+                  <div className="reactions-row">
+                    {msg.reactions.map((reaction) => (
+                      <button
+                        key={reaction.emoji}
+                        className={`reaction-chip ${
+                          currentUser && reaction.userIds.includes(currentUser.id) ? 'active' : ''
+                        }`}
+                        onClick={() => onToggleReaction(msg.id, reaction.emoji)}
+                      >
+                        <span>{reaction.emoji}</span>
+                        <span>{reaction.userIds.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {isSaved && !editing && (
+                <div className="message-actions">
+                  <button
+                    className="message-action-btn"
+                    title="Reagir"
+                    onClick={() => setPickerFor((prev) => (prev === msg.id ? null : msg.id))}
+                  >
+                    <Smile size={16} />
+                  </button>
+                  <button className="message-action-btn" title="Responder" onClick={() => startReply(msg)}>
+                    <Reply size={16} />
+                  </button>
+                  {isOwn && (
+                    <button
+                      className="message-action-btn"
+                      title="Editar"
+                      onClick={() => setEditing({ id: msg.id, text: msg.content })}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  )}
+                  {(isOwn || canModerate) && (
+                    <button
+                      className="message-action-btn danger"
+                      title="Apagar"
+                      onClick={() => setDeletingId(msg.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
               )}
 
-              {msg.reactions && msg.reactions.length > 0 && (
-                <div className="reactions-row">
-                  {msg.reactions.map((reaction, rIdx) => (
+              {pickerFor === msg.id && (
+                <div className="emoji-picker">
+                  {QUICK_EMOJIS.map((emoji) => (
                     <button
-                      key={rIdx}
-                      className={`reaction-chip ${reaction.active ? 'active' : ''}`}
-                      onClick={() => onToggleReaction(msg.id, reaction.emoji)}
+                      key={emoji}
+                      onClick={() => {
+                        onToggleReaction(msg.id, emoji);
+                        setPickerFor(null);
+                      }}
                     >
-                      <span>{reaction.emoji}</span>
-                      <span>{reaction.count}</span>
+                      {emoji}
                     </button>
                   ))}
                 </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
       <div className="chat-input-container">
+        {replyTo && (
+          <div className="reply-bar">
+            <span>
+              Respondendo a <span className="reply-bar-target">{replyTo.authorName}</span>
+            </span>
+            <button className="reply-bar-close" onClick={() => setReplyTo(null)} title="Cancelar resposta">
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <div className="chat-input-bar">
           <button className="chat-input-btn" title="Enviar arquivo">
             <PlusCircle size={22} />
           </button>
 
           <input
+            ref={inputRef}
             type="text"
             className="chat-input-field"
-            placeholder={dmUser ? `Conversar com @${dmUser.name}` : `Conversar em #${channelName}`}
+            placeholder={
+              replyTo
+                ? `Responder a ${replyTo.authorName}`
+                : dmUser
+                  ? `Conversar com @${dmUser.name}`
+                  : `Conversar em #${channelName}`
+            }
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={(e) => {
+              setInputText(e.target.value);
+              if (e.target.value.trim()) onTyping();
+            }}
             onKeyDown={handleKeyDown}
           />
 
@@ -210,7 +398,22 @@ export const ChatArea: FC<ChatAreaProps> = ({
             </button>
           )}
         </div>
+        <div className="typing-indicator">{typingLabel}</div>
       </div>
+
+      {deletingMessage && (
+        <ConfirmDialog
+          title="Apagar mensagem?"
+          message={`"${deletingMessage.content.slice(0, 120)}" será apagada para todos. Isso não pode ser desfeito.`}
+          confirmLabel="Apagar"
+          onConfirm={async () => {
+            onDeleteMessage(deletingMessage.id);
+            setDeletingId(null);
+            return null;
+          }}
+          onClose={() => setDeletingId(null)}
+        />
+      )}
     </div>
   );
 };

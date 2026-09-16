@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ## [Não lançado]
 
 ### Adicionado
+- **Responder mensagens**: a resposta mostra um trecho da mensagem original; se ela for apagada, o trecho vira "mensagem apagada".
+- **Editar e apagar mensagens**: o autor edita a própria mensagem (fica marcada como "editada") e apaga; o dono do servidor pode apagar a de qualquer um.
+- **Reações com emoji** salvas no servidor: todos veem as mesmas reações e quem reagiu, no histórico também.
+- **"Fulano está digitando..."** abaixo da caixa de mensagem, some sozinho quando a pessoa para.
 - **Servidor de mídia (SFU)** na voz, via LiveKit: cada pessoa envia o áudio uma vez só, em vez de uma cópia para cada participante. Sobe com `docker compose -f livekit/docker-compose.yml up -d`; sem ele, a voz continua funcionando em malha P2P.
 - **Quem está no canal de voz** aparece na lista de canais mesmo para quem não entrou na chamada, com indicador de fala, microfone mutado e "AO VIVO".
 - **Transmissão de tela** nos canais de voz: escolha de qualidade (720p30, 1080p30 ou 1080p60, ajustável durante a transmissão), selo "AO VIVO" e contador de quem está assistindo.

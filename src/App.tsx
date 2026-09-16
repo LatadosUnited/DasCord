@@ -39,7 +39,14 @@ import {
 import { apiUpdatePresence } from './services/users';
 import './App.css';
 import { apiGetFriends, FriendsSummary } from './services/friends';
-import { apiGetChannelMessages, mergeMessages, withTimestamp } from './services/messages';
+import {
+  apiGetChannelMessages,
+  applyMessageUpdate,
+  applyReaction,
+  mergeMessages,
+  removeMessage,
+  withTimestamp,
+} from './services/messages';
 import {
   VoiceRosters,
   applyVoiceRosterEvent,
@@ -65,6 +72,13 @@ const SIGNED_OUT_USER: User = {
   role: '',
   roleColor: '',
 };
+
+/** Alguém digitando em um canal, com o momento do último aviso recebido */
+type TypingEntry = { userId: string; name: string; at: number };
+/** Sem um aviso novo nesse tempo, a pessoa parou de digitar */
+const TYPING_TTL_MS = 7000;
+/** Intervalo entre os avisos que enviamos enquanto o usuário digita */
+const TYPING_THROTTLE_MS = 4000;
 
 /** Diálogos abertos pela lista de servidores ou pelo menu do servidor */
 type ServerDialog =
@@ -124,6 +138,28 @@ export function App() {
   useEffect(() => {
     voiceChannelIdRef.current = voiceState.channelId;
   }, [voiceState.channelId]);
+
+  // Quem está digitando em cada canal
+  const [typingByChannel, setTypingByChannel] = useState<Record<string, TypingEntry[]>>({});
+  const lastTypingSentRef = useRef(0);
+
+  // Quem parou de digitar some sozinho: o aviso não tem "parei de digitar"
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const cutoff = Date.now() - TYPING_TTL_MS;
+      setTypingByChannel((prev) => {
+        let changed = false;
+        const next: Record<string, TypingEntry[]> = {};
+        for (const [channelId, entries] of Object.entries(prev)) {
+          const kept = entries.filter((entry) => entry.at > cutoff);
+          if (kept.length !== entries.length) changed = true;
+          if (kept.length > 0) next[channelId] = kept;
+        }
+        return changed ? next : prev;
+      });
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
 
   // UI Panels & Modals
   const [showMemberList, setShowMemberList] = useState(true);
@@ -348,6 +384,46 @@ export function App() {
           ...prev,
           [event.channelId]: mergeMessages(prev[event.channelId] || [], [incomingMsg]),
         }));
+        // Mandou a mensagem: parou de digitar
+        setTypingByChannel((prev) => {
+          const entries = prev[event.channelId];
+          if (!entries?.some((entry) => entry.userId === incomingMsg.author.id)) return prev;
+          return {
+            ...prev,
+            [event.channelId]: entries.filter((entry) => entry.userId !== incomingMsg.author.id),
+          };
+        });
+      } else if (event.type === 'message-updated' && event.data) {
+        const updated: Message = event.data;
+        setMessages((prev) => ({
+          ...prev,
+          [event.channelId]: applyMessageUpdate(prev[event.channelId] || [], updated),
+        }));
+      } else if (event.type === 'message-deleted' && event.data) {
+        const { id } = event.data as { id: string };
+        setMessages((prev) => ({
+          ...prev,
+          [event.channelId]: removeMessage(prev[event.channelId] || [], id),
+        }));
+      } else if (event.type === 'reaction' && event.data) {
+        const { messageId, emoji, userIds } = event.data as {
+          messageId: string;
+          emoji: string;
+          userIds: string[];
+        };
+        setMessages((prev) => ({
+          ...prev,
+          [event.channelId]: applyReaction(prev[event.channelId] || [], messageId, emoji, userIds),
+        }));
+      } else if (event.type === 'typing' && event.data) {
+        const { userId, name } = event.data as { userId: string; name: string };
+        // O aviso volta para todo o canal, inclusive para quem digitou
+        if (userId !== currentUserIdRef.current) {
+          setTypingByChannel((prev) => {
+            const others = (prev[event.channelId] || []).filter((entry) => entry.userId !== userId);
+            return { ...prev, [event.channelId]: [...others, { userId, name, at: Date.now() }] };
+          });
+        }
       } else if (event.type === 'user-updated' && event.data) {
         // Perfil, avatar ou status mudou (seu, em outra sessão, de um amigo ou de um membro)
         applyUserUpdate(event.data as User);
@@ -436,6 +512,7 @@ export function App() {
     : currentServerChannels.find((c) => c.id === activeChannelId && c.type === 'text');
 
   const currentMessages = messages[currentChannelId] || [];
+  const typingNames = (typingByChannel[currentChannelId] || []).map((entry) => entry.name);
 
   // Carrega o histórico salvo ao abrir um canal, e de novo ao reconectar (pega o que chegou offline)
   useEffect(() => {
@@ -529,15 +606,18 @@ export function App() {
   };
 
   // Send message
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, replyToId?: string) => {
     const targetChannelId = currentChannelId;
     // ID local provisório: o servidor devolve a mensagem oficial com este valor em "nonce"
     const localId = generateLocalSnowflake();
+    const repliedTo = replyToId
+      ? (messages[targetChannelId] || []).find((m) => m.id === replyToId)
+      : undefined;
 
     const sent = realtimeSocket.send({
       type: 'message',
       channelId: targetChannelId,
-      data: { id: localId, content: text },
+      data: { id: localId, content: text, replyToId },
     });
 
     const newMessage: Message = {
@@ -548,6 +628,13 @@ export function App() {
       timestamp: sent ? 'Enviando...' : 'Não enviada (sem conexão)',
       reactions: [],
       createdAt: Date.now(),
+      // Versão local da resposta; a oficial chega junto com a mensagem salva
+      replyTo: repliedTo && {
+        id: repliedTo.id,
+        authorName: repliedTo.author.name,
+        content: repliedTo.content,
+        deleted: false,
+      },
     };
 
     setMessages((prev) => ({
@@ -573,33 +660,37 @@ export function App() {
     }
   };
 
-  // Toggle emoji reactions
+  // Reagir, editar e apagar passam pelo servidor: todo mundo vê o mesmo resultado
   const handleToggleReaction = (messageId: string, emoji: string) => {
-    const targetChannelId = currentChannelId;
-    setMessages((prev) => {
-      const channelMsgs = prev[targetChannelId] || [];
-      const updated = channelMsgs.map((m) => {
-        if (m.id !== messageId) return m;
-        const exists = m.reactions.find((r) => r.emoji === emoji);
-        let newReactions;
-        if (exists) {
-          newReactions = m.reactions.map((r) => {
-            if (r.emoji === emoji) {
-              return {
-                ...r,
-                count: r.active ? r.count - 1 : r.count + 1,
-                active: !r.active,
-              };
-            }
-            return r;
-          }).filter((r) => r.count > 0);
-        } else {
-          newReactions = [...m.reactions, { emoji, count: 1, active: true }];
-        }
-        return { ...m, reactions: newReactions };
-      });
-      return { ...prev, [targetChannelId]: updated };
+    realtimeSocket.send({
+      type: 'reaction',
+      channelId: currentChannelId,
+      data: { messageId, emoji },
     });
+  };
+
+  const handleEditMessage = (messageId: string, content: string) => {
+    realtimeSocket.send({
+      type: 'message-edit',
+      channelId: currentChannelId,
+      data: { id: messageId, content },
+    });
+  };
+
+  const handleDeleteMessage = (messageId: string) => {
+    realtimeSocket.send({
+      type: 'message-delete',
+      channelId: currentChannelId,
+      data: { id: messageId },
+    });
+  };
+
+  // Um aviso a cada poucos segundos basta: no destino o indicador some sozinho
+  const handleTyping = () => {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return;
+    lastTypingSentRef.current = now;
+    realtimeSocket.send({ type: 'typing', channelId: currentChannelId, data: {} });
   };
 
   // Voice controls
@@ -753,6 +844,11 @@ export function App() {
             dmUser={isDM ? activeDMUser! : undefined}
             onSendMessage={handleSendMessage}
             onToggleReaction={handleToggleReaction}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onTyping={handleTyping}
+            typingNames={typingNames}
+            canModerate={currentServer?.ownerId === currentUser.id}
             showMemberList={showMemberList && activeServerId !== 'home'}
             onToggleMemberList={() => setShowMemberList(!showMemberList)}
           />

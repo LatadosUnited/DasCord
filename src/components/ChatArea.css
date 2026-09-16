@@ -323,7 +323,187 @@
   color: var(--brand-light);
 }
 
+/* ---------- Resposta, edição e ações da mensagem ---------- */
+
+/* Linha acima da mensagem, mostrando a que ela responde */
+.message-reply-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.message-reply-context:hover .message-reply-text {
+  color: var(--text-normal);
+}
+
+.message-reply-author {
+  font-weight: 700;
+  color: var(--text-normal);
+  flex-shrink: 0;
+}
+
+.message-reply-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--transition-fast);
+}
+
+.message-reply-text.deleted {
+  font-style: italic;
+  color: var(--text-subtle);
+}
+
+.message-edited-tag {
+  font-size: 10px;
+  color: var(--text-subtle);
+  margin-left: 4px;
+}
+
+/* Barra de ações que aparece ao passar o mouse na mensagem */
+.message-actions {
+  position: absolute;
+  top: -12px;
+  right: 12px;
+  display: none;
+  gap: 2px;
+  background-color: var(--bg-floating);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.3));
+}
+
+.message-item:hover .message-actions,
+.message-actions:focus-within {
+  display: flex;
+}
+
+.message-action-btn {
+  background: none;
+  border: none;
+  color: var(--interactive-normal);
+  padding: 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.message-action-btn:hover {
+  color: var(--interactive-active);
+  background-color: var(--bg-active);
+}
+
+.message-action-btn.danger:hover {
+  color: var(--danger-text, #fff);
+  background-color: var(--danger, #d83c3e);
+}
+
+/* Paleta rápida de emojis */
+.emoji-picker {
+  position: absolute;
+  top: 20px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  background-color: var(--bg-floating);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.3));
+}
+
+.emoji-picker button {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.emoji-picker button:hover {
+  background-color: var(--bg-active);
+}
+
+/* Edição no lugar da mensagem */
+.message-edit-field {
+  width: 100%;
+  background-color: var(--input-bg);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  color: var(--text-normal);
+  font-size: 14.5px;
+  font-family: var(--font-main);
+  padding: 8px 10px;
+}
+
+.message-edit-hint {
+  font-size: 11px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+}
+
+.message-edit-hint strong {
+  color: var(--text-muted);
+}
+
 /* ---------- Caixa de mensagem ---------- */
+
+/* Faixa acima da caixa com a mensagem sendo respondida */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-faint);
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.reply-bar-target {
+  color: var(--text-normal);
+  font-weight: 700;
+}
+
+.reply-bar-close {
+  background: none;
+  border: none;
+  color: var(--interactive-normal);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.reply-bar-close:hover {
+  color: var(--interactive-active);
+}
+
+/* Quem está digitando, logo abaixo da caixa */
+.typing-indicator {
+  height: 20px;
+  padding: 2px 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.typing-indicator strong {
+  color: var(--text-normal);
+}
 
 .chat-input-container {
   padding: 0 16px 20px;
