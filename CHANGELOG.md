@@ -17,6 +17,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Quem está na chamada escolhe **assistir** cada transmissão; o vídeo só é enviado para quem pediu.
 
 ### Segurança
+- **Imagens do chat deixam de ser públicas.** Antes eram servidas por uma pasta aberta, com nomes sequenciais: quem acertasse (ou enumerasse) o endereço baixava a imagem, inclusive de mensagens diretas. Agora saem por `GET /api/attachments/{id}` com endereço assinado e validade de 15 minutos, gerado só para quem tem acesso ao canal. Avatares e ícones continuam abertos, por serem públicos por natureza.
+- O anexo passa a ser guardado pelo **nome do arquivo** (esquema v6), não pela URL inteira: o endereço do servidor não fica mais embutido em cada linha do banco.
 - **Instalação fechada**, para quando o servidor fica exposto na internet: cadastro só com convite (`DASCORD_REQUIRE_INVITE`), entrada como convidado desligável (`DASCORD_ALLOW_GUESTS`) e fim da entrada automática no servidor padrão (`DASCORD_AUTO_JOIN_DEFAULT`). Quem chega por convite entra no servidor de quem convidou. Os padrões continuam abertos, como em desenvolvimento.
 - **Limite por endereço de IP** em cadastro, entrada como convidado, login e envio de imagens. O limite de login por conta continua valendo: um protege a senha, o outro impede varrer várias contas do mesmo lugar.
 - O servidor passa a **enxergar o IP real** de quem chega (`ConnectInfo`), inclusive atrás de proxy reverso via `X-Forwarded-For` — mas só quando `DASCORD_BEHIND_PROXY` está ligado, para o cabeçalho não virar um IP escolhido por quem chama.

@@ -44,6 +44,18 @@ sem convidado, o botão some; com convite obrigatório, o campo passa a ser exig
 (ou use uma conta que já existe), gere um convite pelo menu do servidor e só então suba com
 as variáveis acima.
 
+### Arquivos enviados
+
+As imagens do chat saem por `GET /api/attachments/{id}`, com endereço assinado e validade
+curta, gerado só para quem tem acesso ao canal — não há pasta aberta para enumerar. A chave
+da assinatura vem de `DASCORD_SIGNING_SECRET` ou, sem ela, de `signing.key`, criado junto do
+banco na primeira subida. **Guarde esse arquivo nos backups**: perdê-lo não perde imagem
+nenhuma, mas invalida na hora todos os endereços que já estavam abertos na tela.
+
+Avatares e ícones de servidor continuam em pastas abertas (`/avatars`, `/icons`): são públicos
+por natureza. Eles ainda guardam a URL inteira no banco, então **trocar de domínio exige
+reescrever `users.avatar` e `servers.icon`**.
+
 ### Limites por endereço de IP
 
 | O quê | Limite |

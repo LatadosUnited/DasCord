@@ -35,14 +35,17 @@ mod policy;
 mod ratelimit;
 mod servers;
 mod sfu;
+mod signing;
 mod snowflake;
 mod voice;
 use auth::{AuthResponse, AuthStore, LoginError, LoginRequest, PublicUser, RegisterRequest};
 use db::Db;
 use friends::{FriendsStore, RequestActionPayload, SendRequestPayload};
 use messages::{
-    MessageStore, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CHANNEL_ID_LEN, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS,
+    AttachmentDto, MessageDto, MessageStore, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CHANNEL_ID_LEN,
+    MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS,
 };
+use signing::{UrlSigner, ATTACHMENT_URL_TTL_MS};
 use policy::AccessPolicy;
 use ratelimit::RateLimiter;
 use servers::{CreateInvitePayload, ServerDto, ServerError, ServerStore};
@@ -115,6 +118,8 @@ struct AppState {
     public_url: String,
     /// Quem pode entrar e como o servidor enxerga o IP de quem chega
     policy: AccessPolicy,
+    /// Assina os endereços temporários das imagens do chat
+    signer: UrlSigner,
     /// Limites por IP: contas novas, convidados, tentativas de login e uploads
     register_limit: RateLimiter,
     guest_limit: RateLimiter,
@@ -229,6 +234,7 @@ async fn main() {
         attachments_dir: attachments_dir.clone(),
         public_url,
         policy: AccessPolicy::from_env(),
+        signer: UrlSigner::load(data_dir),
         register_limit: RateLimiter::new("cadastro", 5, Duration::from_secs(60 * 60)),
         guest_limit: RateLimiter::new("entrada como convidado", 10, Duration::from_secs(60 * 60)),
         login_limit: RateLimiter::new("tentativas de login", 20, Duration::from_secs(15 * 60)),
@@ -237,12 +243,13 @@ async fn main() {
 
     // Imagens escolhidas mas nunca enviadas não ficam ocupando disco para sempre
     match state.messages.purge_orphan_attachments(ORPHAN_ATTACHMENT_MAX_AGE_MS) {
-        Ok(urls) if !urls.is_empty() => {
-            let prefix = format!("{}/attachments/", state.public_url);
-            for url in &urls {
-                remove_replaced_upload(&attachments_dir, &prefix, url).await;
+        Ok(file_names) if !file_names.is_empty() => {
+            for file_name in &file_names {
+                if let Some(path) = safe_attachment_path(&attachments_dir, file_name) {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
             }
-            println!("🧹 {} imagem(ns) enviada(s) e nunca postada(s) foram descartadas.", urls.len());
+            println!("🧹 {} imagem(ns) enviada(s) e nunca postada(s) foram descartadas.", file_names.len());
         }
         Ok(_) => {}
         Err(e) => eprintln!("⚠️ Falha ao limpar anexos órfãos: {}", e),
@@ -288,9 +295,11 @@ async fn main() {
         .route("/api/voice/token", get(voice_token_handler))
         .route("/api/servers/{server_id}/invites", post(create_invite_handler))
         .route("/api/invites/{code}/accept", post(accept_invite_handler))
+        // Avatares e ícones continuam abertos: são públicos por natureza.
+        // As imagens do chat, não — elas saem por /api/attachments/{id}, com endereço assinado.
         .nest_service("/avatars", ServeDir::new(&avatars_dir))
         .nest_service("/icons", ServeDir::new(&icons_dir))
-        .nest_service("/attachments", ServeDir::new(&attachments_dir))
+        .route("/api/attachments/{attachment_id}", get(attachment_handler))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -714,6 +723,89 @@ async fn remove_replaced_upload(dir: &Path, public_prefix: &str, old_url: &str) 
     }
 }
 
+/// Caminho do arquivo dentro da pasta de anexos, ou None se o nome tentar sair dela
+fn safe_attachment_path(dir: &Path, file_name: &str) -> Option<PathBuf> {
+    if file_name.is_empty() || file_name.contains(['/', '\\']) || file_name.contains("..") {
+        return None;
+    }
+    Some(dir.join(file_name))
+}
+
+/// Endereço temporário de um anexo. Vale por poucos minutos e não serve para mais nada:
+/// quem o recebe já teve o acesso ao canal conferido aqui.
+fn sign_attachment(state: &AppState, attachment: &mut AttachmentDto, expires_at: i64) {
+    let signature = state.signer.sign(&attachment.id, expires_at);
+    attachment.url = format!(
+        "{}/api/attachments/{}?expires={}&sig={}",
+        state.public_url, attachment.id, expires_at, signature
+    );
+}
+
+/// Troca os nomes de arquivo pelos endereços assinados, logo antes de a mensagem
+/// sair para o app — pelo histórico ou pelo WebSocket.
+fn sign_message_attachments(state: &AppState, message: &mut MessageDto) {
+    if message.attachments.is_empty() {
+        return;
+    }
+    let expires_at = db::now_ms() + ATTACHMENT_URL_TTL_MS;
+    for attachment in message.attachments.iter_mut() {
+        sign_attachment(state, attachment, expires_at);
+    }
+}
+
+#[derive(Deserialize)]
+struct SignedAttachmentQuery {
+    expires: i64,
+    sig: String,
+}
+
+/// Entrega a imagem a quem chega com um endereço assinado e dentro da validade.
+/// Sem `ServeDir`: acertar (ou adivinhar) o nome do arquivo não basta mais.
+async fn attachment_handler(
+    State(state): State<Arc<AppState>>,
+    AxumPath(attachment_id): AxumPath<String>,
+    Query(query): Query<SignedAttachmentQuery>,
+) -> Response {
+    let not_found = || (StatusCode::NOT_FOUND, "Anexo não encontrado.").into_response();
+
+    if !state.signer.verify(&attachment_id, query.expires, &query.sig, db::now_ms()) {
+        return (StatusCode::FORBIDDEN, "Endereço expirado ou inválido.").into_response();
+    }
+    let Ok(Some(source)) = state.messages.attachment_source(&attachment_id) else {
+        return not_found();
+    };
+    let Some(path) = safe_attachment_path(&state.attachments_dir, &source.file_name) else {
+        return not_found();
+    };
+    let Ok(bytes) = tokio::fs::read(&path).await else {
+        return not_found();
+    };
+
+    // O nome original é do usuário: só o que é seguro em cabeçalho continua nele
+    let safe_name: String = source
+        .name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .collect();
+    let disposition = if safe_name.trim().is_empty() {
+        "inline".to_string()
+    } else {
+        format!("inline; filename=\"{}\"", safe_name.trim())
+    };
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, source.content_type),
+            (header::CONTENT_DISPOSITION, disposition),
+            // Privado: o endereço é de uma pessoa só, e some com a validade
+            (header::CACHE_CONTROL, "private, max-age=600".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 #[derive(Deserialize)]
 struct AttachmentQuery {
     /// Nome original do arquivo, só para exibição
@@ -761,17 +853,21 @@ async fn upload_attachment_handler(
     let display_name = query.name.chars().take(120).collect::<String>();
     let display_name = if display_name.trim().is_empty() { file_name.clone() } else { display_name };
 
-    let url = format!("{}/attachments/{}", state.public_url, file_name);
     match state.messages.create_attachment(
         &channel_id,
         &user_id,
-        &url,
+        &file_name,
         &display_name,
         content_type,
         size,
         &state.snowflake,
     ) {
-        Ok(attachment) => (StatusCode::CREATED, Json(json!({ "success": true, "attachment": attachment }))),
+        Ok(mut attachment) => {
+            // A pré-visualização no app usa o arquivo local; este endereço é o
+            // que vai junto da mensagem quando ela for enviada.
+            sign_attachment(&state, &mut attachment, db::now_ms() + ATTACHMENT_URL_TTL_MS);
+            (StatusCode::CREATED, Json(json!({ "success": true, "attachment": attachment })))
+        }
         Err(err) => {
             let _ = tokio::fs::remove_file(&file_path).await;
             json_error(StatusCode::INTERNAL_SERVER_ERROR, &err)
@@ -1177,7 +1273,12 @@ async fn channel_messages_handler(
 
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     match state.messages.history(&channel_id, query.before, limit) {
-        Ok(messages) => (StatusCode::OK, Json(json!({ "messages": messages }))),
+        Ok(mut messages) => {
+            for message in messages.iter_mut() {
+                sign_message_attachments(&state, message);
+            }
+            (StatusCode::OK, Json(json!({ "messages": messages })))
+        }
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))),
     }
 }
@@ -1493,7 +1594,7 @@ fn handle_client_event(
             let nonce = event["data"].get("id").and_then(|n| n.as_str()).map(str::to_string);
             let reply_to = event["data"].get("replyToId").and_then(|r| r.as_str()).map(str::to_string);
 
-            let saved = match state.messages.insert(
+            let mut saved = match state.messages.insert(
                 &channel_id,
                 user,
                 &content,
@@ -1504,6 +1605,7 @@ fn handle_client_event(
                 Ok(saved) => saved,
                 Err(_) => return,
             };
+            sign_message_attachments(state, &mut saved);
             let mut data = json!(saved);
             if let Some(nonce) = nonce {
                 data["nonce"] = json!(nonce);
@@ -1534,9 +1636,10 @@ fn handle_client_event(
             if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
                 return;
             }
-            let Ok(Some(updated)) = state.messages.edit(&channel_id, &message_id, &user.id, &content) else {
+            let Ok(Some(mut updated)) = state.messages.edit(&channel_id, &message_id, &user.id, &content) else {
                 return;
             };
+            sign_message_attachments(state, &mut updated);
             event["type"] = json!("message-updated");
             event["data"] = json!(updated);
             target

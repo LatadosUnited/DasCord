@@ -1,4 +1,4 @@
-use rusqlite::{params, params_from_iter, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,11 +33,23 @@ pub struct AttachmentDto {
     /// Sempre "image" por enquanto; o app já distingue de blocos de código
     #[serde(rename = "type")]
     pub kind: String,
+    /// Sai do store com o **nome do arquivo**; quem responde ao app troca pelo
+    /// endereço temporário e assinado, que é o que o navegador pode buscar.
     pub url: String,
     pub name: String,
     #[serde(rename = "contentType")]
     pub content_type: String,
     pub size: i64,
+}
+
+/// O que o servidor precisa para entregar um anexo a quem tem direito a ele.
+/// O direito já foi conferido quando o endereço assinado foi gerado.
+pub struct AttachmentSource {
+    /// Nome do arquivo dentro da pasta de anexos (sem caminho e sem domínio)
+    pub file_name: String,
+    /// Nome original, para o navegador sugerir ao salvar
+    pub name: String,
+    pub content_type: String,
 }
 
 /// Mensagem respondida, como ela era no momento da leitura
@@ -143,7 +155,7 @@ impl MessageStore {
         &self,
         channel_id: &str,
         user_id: &str,
-        url: &str,
+        file_name: &str,
         name: &str,
         content_type: &str,
         size: i64,
@@ -155,22 +167,41 @@ impl MessageStore {
             "INSERT INTO message_attachments
                 (id, message_id, channel_id, uploaded_by, url, name, content_type, size, created_at)
              VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, channel_id, user_id, url, name, content_type, size, now_ms()],
+            params![id, channel_id, user_id, file_name, name, content_type, size, now_ms()],
         )
         .map_err(internal_error)?;
 
         Ok(AttachmentDto {
             id,
             kind: "image".to_string(),
-            url: url.to_string(),
+            url: file_name.to_string(),
             name: name.to_string(),
             content_type: content_type.to_string(),
             size,
         })
     }
 
+    /// Arquivo, nome original e tipo de um anexo, para entregá-lo.
+    /// O acesso ao canal foi conferido antes, ao gerar o endereço assinado.
+    pub fn attachment_source(&self, attachment_id: &str) -> Result<Option<AttachmentSource>, String> {
+        let conn = self.db.conn();
+        conn.query_row(
+            "SELECT url, name, content_type FROM message_attachments WHERE id = ?1",
+            params![attachment_id],
+            |r| {
+                Ok(AttachmentSource {
+                    file_name: r.get(0)?,
+                    name: r.get(1)?,
+                    content_type: r.get(2)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(internal_error)
+    }
+
     /// Uploads que nunca viraram mensagem (a pessoa desistiu ou fechou o app).
-    /// Devolve as URLs para que os arquivos também saiam do disco.
+    /// Devolve os nomes dos arquivos, para que eles também saiam do disco.
     pub fn purge_orphan_attachments(&self, older_than_ms: i64) -> Result<Vec<String>, String> {
         let cutoff = now_ms() - older_than_ms;
         let conn = self.db.conn();
