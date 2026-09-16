@@ -1,12 +1,16 @@
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
-import { Info, Mic, Square, Volume2 } from 'lucide-react';
+import { Headphones, HeadphoneOff, Info, Mic, Square, Volume2 } from 'lucide-react';
 import {
+  ANALYSER_FFT_SIZE,
   AudioDevices,
+  LevelMeter,
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
+  SpeechGate,
   applyOutputDevice,
   audioInputConstraints,
-  averageVolume,
+  createLevelMeter,
+  createSpeechGate,
   deviceLabel,
   listAudioDevices,
   requestMicrophonePermission,
@@ -15,21 +19,26 @@ import {
   useVoiceSettings,
 } from '../../services/voiceSettings';
 
-const toPercent = (value: number) => Math.min(100, (value / SENSITIVITY_MAX) * 100);
+/** Sobe/desce em ~30 ms: sem a rampa o retorno estala ao ligar e desligar */
+const MONITOR_RAMP = 0.03;
 
 export const VoiceTab: FC = () => {
   const settings = useVoiceSettings();
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
+  const [speaking, setSpeaking] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const [playingTone, setPlayingTone] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const frameRef = useRef<number | null>(null);
+  const meterRef = useRef<LevelMeter | null>(null);
+  const gateRef = useRef<SpeechGate | null>(null);
   // Devolve a propria voz durante o teste, como no Discord
   const monitorRef = useRef<HTMLAudioElement | null>(null);
+  const monitorGainRef = useRef<GainNode | null>(null);
 
   const refreshDevices = useCallback(() => {
     listAudioDevices().then(setDevices);
@@ -49,11 +58,15 @@ export const VoiceTab: FC = () => {
       monitorRef.current.srcObject = null;
       monitorRef.current = null;
     }
+    monitorGainRef.current = null;
+    meterRef.current = null;
+    gateRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     contextRef.current?.close().catch(() => {});
     contextRef.current = null;
     setLevel(0);
+    setSpeaking(false);
     setTesting(false);
   }, []);
 
@@ -64,25 +77,40 @@ export const VoiceTab: FC = () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: audioInputConstraints(deviceId) });
         const context = new AudioContext();
+        // Em alguns navegadores o contexto nasce suspenso e nada tocaria nem seria medido
+        await context.resume().catch(() => {});
+
+        const source = context.createMediaStreamSource(stream);
         const analyser = context.createAnalyser();
-        analyser.fftSize = 256;
-        context.createMediaStreamSource(stream).connect(analyser);
-        const buffer = new Uint8Array(analyser.frequencyBinCount);
+        analyser.fftSize = ANALYSER_FFT_SIZE;
+        source.connect(analyser);
+
+        // O retorno sai pelo mesmo grafo do medidor. Ligar o stream cru num <audio>
+        // faz o navegador abrir um segundo caminho de áudio e é o que picotava a voz.
+        const monitorGain = context.createGain();
+        monitorGain.gain.value = settings.monitorInput ? 1 : 0;
+        const destination = context.createMediaStreamDestination();
+        source.connect(monitorGain).connect(destination);
+
+        const monitor = new Audio();
+        monitor.srcObject = destination.stream;
+        applyOutputDevice(monitor, settings.outputDeviceId);
+        monitor.play().catch(() => {});
 
         streamRef.current = stream;
         contextRef.current = context;
-
-        // Ouvir a propria voz e o que torna o teste util: da para julgar volume e ruido
-        const monitor = new Audio();
-        monitor.srcObject = stream;
-        applyOutputDevice(monitor, settings.outputDeviceId);
-        monitor.play().catch(() => {});
         monitorRef.current = monitor;
+        monitorGainRef.current = monitorGain;
+        meterRef.current = createLevelMeter(analyser);
+        gateRef.current = createSpeechGate();
+
         setTesting(true);
         refreshDevices(); // com a permissão concedida, os nomes aparecem
 
         const tick = () => {
-          setLevel(averageVolume(analyser, buffer));
+          const current = meterRef.current?.read() ?? 0;
+          setLevel(current);
+          setSpeaking(gateRef.current?.update(current) ?? false);
           frameRef.current = requestAnimationFrame(tick);
         };
         tick();
@@ -90,13 +118,21 @@ export const VoiceTab: FC = () => {
         setTestError('Não foi possível acessar o microfone. Verifique a permissão do sistema.');
       }
     },
-    [refreshDevices, stopTest, settings.outputDeviceId]
+    [refreshDevices, stopTest, settings.outputDeviceId, settings.monitorInput]
   );
 
   // Trocar a saida durante o teste redireciona o retorno na hora
   useEffect(() => {
     if (monitorRef.current) applyOutputDevice(monitorRef.current, settings.outputDeviceId);
   }, [settings.outputDeviceId]);
+
+  // Ligar/desligar o retorno só mexe no ganho: o teste e o medidor continuam
+  useEffect(() => {
+    const gain = monitorGainRef.current;
+    const context = contextRef.current;
+    if (!gain || !context) return;
+    gain.gain.setTargetAtTime(settings.monitorInput ? 1 : 0, context.currentTime, MONITOR_RAMP);
+  }, [settings.monitorInput]);
 
   // Encerra o teste ao sair da aba
   useEffect(() => stopTest, [stopTest]);
@@ -110,11 +146,16 @@ export const VoiceTab: FC = () => {
   const playTestTone = async () => {
     setPlayingTone(true);
     const context = new AudioContext();
+    await context.resume().catch(() => {});
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     const destination = context.createMediaStreamDestination();
     oscillator.frequency.value = 440;
-    gain.gain.value = 0.15;
+    // Entra e sai em rampa: um seno cortado no zero estala no alto-falante
+    gain.gain.setValueAtTime(0, context.currentTime);
+    gain.gain.linearRampToValueAtTime(0.15, context.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.15, context.currentTime + 0.6);
+    gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.7);
     oscillator.connect(gain).connect(destination);
 
     const audio = new Audio();
@@ -128,7 +169,7 @@ export const VoiceTab: FC = () => {
       audio.pause();
       context.close().catch(() => {});
       setPlayingTone(false);
-    }, 700);
+    }, 800);
   };
 
   const grantPermission = async () => {
@@ -137,7 +178,6 @@ export const VoiceTab: FC = () => {
   };
 
   const needsPermission = devices.inputs.length > 0 && devices.inputs.every((d) => !d.label);
-  const speaking = testing && level > settings.inputSensitivity;
 
   return (
     <div className="settings-section">
@@ -192,8 +232,9 @@ export const VoiceTab: FC = () => {
       <section className="settings-group">
         <h3 className="settings-group-title">Teste de microfone</h3>
         <p className="settings-help">
-          Fale algo: você vai se ouvir de volta e a barra mostra o volume captado. A marca indica a partir de
-          onde sua voz é transmitida. Se estiver sem fone, o som pode realimentar o microfone.
+          Fale algo: a barra mostra o volume captado e a marca indica a partir de onde você aparece como
+          falando. Com o retorno ligado você também se ouve — sem fone, o alto-falante volta para o microfone e
+          o cancelamento de eco corta pedaços da sua voz.
         </p>
         <div className="mic-test-row">
           <button
@@ -202,6 +243,14 @@ export const VoiceTab: FC = () => {
           >
             {testing ? <Square size={14} /> : <Mic size={16} />}
             {testing ? 'Parar teste' : 'Vamos checar'}
+          </button>
+          <button
+            className="btn secondary fit"
+            onClick={() => updateVoiceSettings({ monitorInput: !settings.monitorInput })}
+            aria-pressed={settings.monitorInput}
+          >
+            {settings.monitorInput ? <Headphones size={16} /> : <HeadphoneOff size={16} />}
+            {settings.monitorInput ? 'Ouvindo minha voz' : 'Retorno desligado'}
           </button>
           <button className="btn secondary fit" onClick={playTestTone} disabled={playingTone}>
             <Volume2 size={16} />
@@ -212,10 +261,13 @@ export const VoiceTab: FC = () => {
       </section>
 
       <section className="settings-group">
-        <h3 className="settings-group-title">Sensibilidade de entrada</h3>
+        <div className="settings-group-header">
+          <h3 className="settings-group-title">Sensibilidade de entrada</h3>
+          <span className="sensitivity-value">{settings.inputSensitivity}%</span>
+        </div>
         <div className={`sensitivity-meter ${speaking ? 'speaking' : ''}`}>
-          <div className="sensitivity-level" style={{ width: `${toPercent(level)}%` }} />
-          <div className="sensitivity-threshold" style={{ left: `${toPercent(settings.inputSensitivity)}%` }} />
+          <div className="sensitivity-level" style={{ width: `${level}%` }} />
+          <div className="sensitivity-threshold" style={{ left: `${settings.inputSensitivity}%` }} />
         </div>
         <input
           type="range"
@@ -228,7 +280,7 @@ export const VoiceTab: FC = () => {
         />
         <p className="settings-help">
           Arraste para a esquerda se sua voz não estiver sendo detectada, ou para a direita se ruídos de fundo
-          estiverem abrindo o microfone.
+          estiverem abrindo o microfone. Em 0% o microfone conta como sempre aberto.
         </p>
       </section>
 

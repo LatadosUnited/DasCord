@@ -2,10 +2,14 @@ import { useSyncExternalStore } from 'react';
 import { realtimeSocket, SocketEvent } from './socket';
 import { ICE_SERVERS } from './config';
 import {
+  ANALYSER_FFT_SIZE,
   applyOutputDevice,
   audioInputConstraints,
-  averageVolume,
+  createLevelMeter,
+  createSpeechGate,
   getVoiceSettings,
+  LevelMeter,
+  SpeechGate,
   screenQualityPreset,
   ScreenQualityPreset,
   screenVideoConstraints,
@@ -61,6 +65,8 @@ class WebRTCVoiceService {
   private localStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private levelMeter: LevelMeter | null = null;
+  private speechGate: SpeechGate | null = null;
   private vadInterval: any = null;
   private isSpeaking = false;
   private currentUser: User | null = null;
@@ -639,18 +645,26 @@ class WebRTCVoiceService {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioCtx();
+      // Em alguns navegadores o contexto nasce suspenso e o medidor ficaria parado em zero
+      this.audioContext.resume().catch(() => {});
       const source = this.audioContext.createMediaStreamSource(stream);
       this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
+      this.analyser.fftSize = ANALYSER_FFT_SIZE;
       source.connect(this.analyser);
 
-      const buffer = new Uint8Array(this.analyser.frequencyBinCount);
+      this.levelMeter = createLevelMeter(this.analyser);
+      this.speechGate = createSpeechGate();
 
       this.vadInterval = setInterval(() => {
-        if (this.isMuted || !this.analyser) return;
+        if (!this.levelMeter || !this.speechGate) return;
+        if (this.isMuted) {
+          this.levelMeter.reset();
+          this.speechGate.reset();
+          return;
+        }
 
         // Limiar de fala ajustável em Configurações > Voz e Áudio
-        const speakingNow = averageVolume(this.analyser, buffer) > getVoiceSettings().inputSensitivity;
+        const speakingNow = this.speechGate.update(this.levelMeter.read());
         if (speakingNow !== this.isSpeaking) {
           this.isSpeaking = speakingNow;
           if (this.currentUser) {
@@ -662,7 +676,8 @@ class WebRTCVoiceService {
             this.broadcastSpeaking(speakingNow);
           }
         }
-      }, 100);
+        // Amostragem mais fina que a janela do analisador: o portão precisa ver os ataques
+      }, 50);
     } catch (e) {
       console.warn('Erro ao configurar AnalyserNode VAD:', e);
     }
@@ -678,6 +693,9 @@ class WebRTCVoiceService {
     }
     this.audioContext = null;
     this.analyser = null;
+    this.levelMeter = null;
+    this.speechGate = null;
+    this.isSpeaking = false;
   }
 
   private broadcastSpeaking(speaking: boolean) {

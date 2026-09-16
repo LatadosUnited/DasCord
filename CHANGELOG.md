@@ -31,6 +31,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Corrigido
 - Conexão de voz que caía (troca de rede, VPN) deixava a pessoa muda para sempre: agora o app reinicia o ICE e mostra "Reconectando".
 - Microfone desconectado no meio da chamada troca para o padrão do sistema; sem nenhum microfone, o app avisa em vez de fingir que a pessoa está falando.
+- **A barra de sensibilidade não chegava ao fim.** O nível era a média do espectro inteiro, e as faixas agudas vazias puxavam a conta para baixo: mesmo gritando a barra mal passava da metade. Agora a medida é o volume da onda em decibéis, e a escala vai de 0 a 100% de ponta a ponta. O limiar salvo antes é convertido sozinho para a escala nova.
+- **O retorno da própria voz no teste de microfone picotava.** O som saía por um caminho de áudio paralelo ao do medidor; agora os dois saem do mesmo lugar.
+- **O indicador de fala piscava no meio das frases.** Passa a esperar um instante de silêncio antes de considerar que a pessoa parou de falar, em vez de reagir a cada pausa entre sílabas.
+- O tom de "Testar saída" entra e sai suave, sem o estalo de antes.
+
+### Alterado
+- O teste de microfone ganhou um botão para **desligar o retorno da própria voz**: sem fone, o alto-falante volta para o microfone e o cancelamento de eco corta pedaços da voz. Assim dá para conferir o nível sem se ouvir.
+- A sensibilidade de entrada mostra o valor em porcentagem ao lado do título.
 
 ## [0.2.0] - 2026-09-15
 

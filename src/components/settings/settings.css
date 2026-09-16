@@ -484,6 +484,20 @@
   gap: 8px;
 }
 
+.settings-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sensitivity-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-subtle);
+}
+
 .sensitivity-meter {
   position: relative;
   height: 10px;
