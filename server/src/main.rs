@@ -29,6 +29,7 @@ use tower_http::services::ServeDir;
 mod auth;
 mod db;
 mod friends;
+mod media;
 mod messages;
 mod migration;
 mod policy;
@@ -212,6 +213,8 @@ async fn main() {
         .unwrap_or_else(|_| format!("http://localhost:{}", addr.port()))
         .trim_end_matches('/')
         .to_string();
+    // Os stores montam a URL dos avatares e ícones na leitura a partir daqui
+    media::set_public_url(&public_url);
 
     // Broadcast channel with buffer for 256 messages
     let (tx, _rx) = broadcast::channel(256);
@@ -245,7 +248,7 @@ async fn main() {
     match state.messages.purge_orphan_attachments(ORPHAN_ATTACHMENT_MAX_AGE_MS) {
         Ok(file_names) if !file_names.is_empty() => {
             for file_name in &file_names {
-                if let Some(path) = safe_attachment_path(&attachments_dir, file_name) {
+                if let Some(path) = safe_upload_path(&attachments_dir, file_name) {
                     let _ = tokio::fs::remove_file(path).await;
                 }
             }
@@ -681,10 +684,10 @@ async fn upload_avatar_handler(
         Err(reply) => return reply,
     };
 
-    let avatars_prefix = format!("{}/avatars/", state.public_url);
-    match state.auth.set_avatar(&user_id, &format!("{}{}", avatars_prefix, file_name)) {
+    // Só o nome do arquivo vai para o banco; a URL é montada na leitura
+    match state.auth.set_avatar(&user_id, &file_name) {
         Ok((user, old_avatar)) => {
-            remove_replaced_upload(&state.avatars_dir, &avatars_prefix, &old_avatar).await;
+            remove_replaced_upload(&state.avatars_dir, &old_avatar).await;
             broadcast_user_update(&state, &user, true);
             (StatusCode::OK, Json(json!({ "success": true, "user": user })))
         }
@@ -714,17 +717,19 @@ async fn save_uploaded_image(
     Ok((file_name, file_path))
 }
 
-/// Apaga o arquivo substituído, só se ele foi enviado para esta pasta deste servidor
-async fn remove_replaced_upload(dir: &Path, public_prefix: &str, old_url: &str) {
-    if let Some(old_file) = old_url.strip_prefix(public_prefix) {
-        if !old_file.is_empty() && !old_file.contains(['/', '\\']) && !old_file.contains("..") {
-            let _ = tokio::fs::remove_file(dir.join(old_file)).await;
-        }
+/// Apaga o arquivo que acabou de ser substituído.
+///
+/// Recebe o que estava guardado no banco: o avatar padrão é um endereço
+/// externo, e um nome de arquivo inválido não passa pela conferência — então
+/// nenhum dos dois apaga nada.
+async fn remove_replaced_upload(dir: &Path, old_file: &str) {
+    if let Some(path) = safe_upload_path(dir, old_file) {
+        let _ = tokio::fs::remove_file(path).await;
     }
 }
 
-/// Caminho do arquivo dentro da pasta de anexos, ou None se o nome tentar sair dela
-fn safe_attachment_path(dir: &Path, file_name: &str) -> Option<PathBuf> {
+/// Caminho do arquivo dentro da pasta, ou None se o nome tentar sair dela
+fn safe_upload_path(dir: &Path, file_name: &str) -> Option<PathBuf> {
     if file_name.is_empty() || file_name.contains(['/', '\\']) || file_name.contains("..") {
         return None;
     }
@@ -774,7 +779,7 @@ async fn attachment_handler(
     let Ok(Some(source)) = state.messages.attachment_source(&attachment_id) else {
         return not_found();
     };
-    let Some(path) = safe_attachment_path(&state.attachments_dir, &source.file_name) else {
+    let Some(path) = safe_upload_path(&state.attachments_dir, &source.file_name) else {
         return not_found();
     };
     let Ok(bytes) = tokio::fs::read(&path).await else {
@@ -1008,10 +1013,9 @@ async fn upload_server_icon_handler(
         Err(reply) => return reply,
     };
 
-    let icons_prefix = format!("{}/icons/", state.public_url);
-    match state.servers.set_icon(&server_id, &user_id, &format!("{}{}", icons_prefix, file_name)) {
+    match state.servers.set_icon(&server_id, &user_id, &file_name) {
         Ok((server, old_icon)) => {
-            remove_replaced_upload(&state.icons_dir, &icons_prefix, &old_icon).await;
+            remove_replaced_upload(&state.icons_dir, &old_icon).await;
             publish_server_updated(&state, &server);
             (StatusCode::OK, Json(json!({ "success": true, "server": server })))
         }
@@ -1033,8 +1037,7 @@ async fn delete_server_handler(
     };
     match state.servers.delete(&server_id, &user_id) {
         Ok((former_members, icon)) => {
-            let icons_prefix = format!("{}/icons/", state.public_url);
-            remove_replaced_upload(&state.icons_dir, &icons_prefix, &icon).await;
+            remove_replaced_upload(&state.icons_dir, &icon).await;
             state.voice.remove_server(&server_id);
             let event = json!({ "type": "server-deleted", "channelId": "", "data": { "serverId": server_id } });
             publish(&state, event, Target::Users(former_members));

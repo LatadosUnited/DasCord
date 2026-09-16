@@ -90,12 +90,14 @@ pub fn import_legacy_json(db: &Db, data_dir: &Path) {
 
         let tx = conn.transaction()?;
         for u in users.values() {
+            // O banco guarda só o nome do arquivo; endereço antigo vira nome
+            let avatar = crate::media::stored_name(&u.avatar, "avatars");
             tx.execute(
                 "INSERT INTO users (id, email, username, tag, display_name, password_hash, salt, avatar, role, role_color, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     u.id, u.email.to_lowercase(), u.username.to_lowercase(), u.tag, u.display_name,
-                    u.password_hash, u.salt, u.avatar, u.role, u.role_color, u.created_at
+                    u.password_hash, u.salt, avatar, u.role, u.role_color, u.created_at
                 ],
             )?;
         }

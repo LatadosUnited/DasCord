@@ -123,7 +123,8 @@ pub fn public_user_by_id(conn: &Connection, id: &str) -> rusqlite::Result<Option
                     id: r.get(0)?,
                     name: if display_name.is_empty() { username } else { display_name },
                     tag: r.get(3)?,
-                    avatar: r.get(4)?,
+                    // O banco guarda só o nome do arquivo (veja crate::media)
+                    avatar: crate::media::avatar_url(&r.get::<_, String>(4)?),
                     role: r.get(5)?,
                     role_color: r.get(6)?,
                     status: r.get(7)?,
@@ -144,7 +145,7 @@ pub fn public_user_by_id(conn: &Connection, id: &str) -> rusqlite::Result<Option
                 id: r.get(0)?,
                 name: r.get(1)?,
                 tag: r.get(2)?,
-                avatar: r.get(3)?,
+                avatar: crate::media::avatar_url(&r.get::<_, String>(3)?),
                 custom_status: r.get(4)?,
                 status: r.get(5)?,
                 role: "Visitante".to_string(),

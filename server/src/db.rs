@@ -196,6 +196,18 @@ UPDATE message_attachments SET url = substr(url, instr(url, '/attachments/') + 1
     WHERE instr(url, '/attachments/') > 0;
 ";
 
+// Avatares e ícones seguem o mesmo caminho dos anexos na v6: o endereço do
+// servidor sai das linhas e passa a ser montado na leitura. O avatar padrão é
+// um endereço externo (Unsplash) e não casa com o filtro, então fica intacto.
+const SCHEMA_V7: &str = "
+UPDATE users SET avatar = substr(avatar, instr(avatar, '/avatars/') + 9)
+    WHERE instr(avatar, '/avatars/') > 0;
+UPDATE guests SET avatar = substr(avatar, instr(avatar, '/avatars/') + 9)
+    WHERE instr(avatar, '/avatars/') > 0;
+UPDATE servers SET icon = substr(icon, instr(icon, '/icons/') + 7)
+    WHERE instr(icon, '/icons/') > 0;
+";
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -246,6 +258,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 6 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V6} PRAGMA user_version = 6; COMMIT;"))?;
         println!("🗄️ Banco de dados atualizado para o esquema v6 (arquivos sem o endereço do servidor).");
+    }
+    if version < 7 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V7} PRAGMA user_version = 7; COMMIT;"))?;
+        println!("🗄️ Banco de dados atualizado para o esquema v7 (avatares e ícones sem o endereço do servidor).");
     }
     Ok(())
 }

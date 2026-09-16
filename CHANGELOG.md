@@ -31,6 +31,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Corrigido
 - Conexão de voz que caía (troca de rede, VPN) deixava a pessoa muda para sempre: agora o app reinicia o ICE e mostra "Reconectando".
 - Microfone desconectado no meio da chamada troca para o padrão do sistema; sem nenhum microfone, o app avisa em vez de fingir que a pessoa está falando.
+- **Trocar o endereço do servidor quebrava avatares e ícones já enviados.** O endereço completo ia gravado em cada linha do banco, então mudar de domínio deixava as imagens apontando para o lugar antigo. Agora o banco guarda só o nome do arquivo e a URL é montada na leitura (esquema v7), como já era feito com as imagens do chat. Os avatares e ícones que já existem são convertidos sozinhos na primeira subida.
 
 ## [0.2.0] - 2026-09-15
 

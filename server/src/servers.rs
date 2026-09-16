@@ -157,7 +157,7 @@ fn server_dto(conn: &Connection, server_id: &str) -> rusqlite::Result<Option<Ser
                 Ok(ServerDto {
                     id: r.get(0)?,
                     name: r.get(1)?,
-                    icon: r.get(2)?,
+                    icon: crate::media::icon_url(&r.get::<_, String>(2)?),
                     owner_id: r.get(3)?,
                     is_default: r.get(4)?,
                     member_count: r.get(5)?,
