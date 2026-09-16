@@ -13,6 +13,10 @@ export interface ServerVersionInfo {
   /** null: servidor anterior à 0.2.0, que ainda não informava a versão */
   version: string | null;
   minClientVersion: string | null;
+  /** Cadastro só com convite. null: servidor antigo, que não informa as regras */
+  requireInvite: boolean | null;
+  /** Entrada como convidado. null: servidor antigo, que não informa as regras */
+  allowGuests: boolean | null;
 }
 
 export type VersionIssue =
@@ -45,10 +49,17 @@ export function findVersionIssue(server: ServerVersionInfo): VersionIssue | null
 export async function apiGetServerVersion(): Promise<ServerVersionInfo | null> {
   try {
     const res = await fetch(`${API_URL}/api/version`);
-    if (res.status === 404) return { version: null, minClientVersion: null };
+    if (res.status === 404) {
+      return { version: null, minClientVersion: null, requireInvite: null, allowGuests: null };
+    }
     if (!res.ok) return null;
     const body = await res.json();
-    return { version: body.version ?? null, minClientVersion: body.minClientVersion ?? null };
+    return {
+      version: body.version ?? null,
+      minClientVersion: body.minClientVersion ?? null,
+      requireInvite: typeof body.requireInvite === 'boolean' ? body.requireInvite : null,
+      allowGuests: typeof body.allowGuests === 'boolean' ? body.allowGuests : null,
+    };
   } catch {
     return null;
   }

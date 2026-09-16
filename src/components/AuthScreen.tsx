@@ -1,7 +1,8 @@
-import { useState, FC, FormEvent } from 'react';
-import { QrCode, Sparkles, ArrowRight, ShieldCheck, Lightbulb, AlertCircle } from 'lucide-react';
+import { useState, useEffect, FC, FormEvent } from 'react';
+import { QrCode, Sparkles, ArrowRight, ShieldCheck, Lightbulb, AlertCircle, Ticket } from 'lucide-react';
 import { User } from '../types';
 import { apiGuestLogin, apiLogin, apiRegister, saveLocalSession } from '../services/auth';
+import { apiGetServerVersion } from '../services/version';
 import './AuthScreen.css';
 
 interface AuthScreenProps {
@@ -22,8 +23,25 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Regras deste servidor. null enquanto não sabemos (ou servidor antigo):
+  // nesse caso a tela mantém tudo visível, como antes.
+  const [requireInvite, setRequireInvite] = useState<boolean | null>(null);
+  const [allowGuests, setAllowGuests] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGetServerVersion().then((info) => {
+      if (cancelled || !info) return;
+      setRequireInvite(info.requireInvite);
+      setAllowGuests(info.allowGuests);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const switchMode = (next: 'login' | 'register') => {
     setError(null);
@@ -43,6 +61,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
               username,
               displayName: displayName.trim() ? displayName : undefined,
               password,
+              inviteCode: inviteCode.trim() ? inviteCode.trim() : undefined,
             })
           : await apiLogin({ login: email, password });
 
@@ -138,16 +157,19 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
                   {loading ? 'Verificando credenciais...' : 'Entrar'}
                 </button>
 
-                <button
-                  type="button"
-                  className="auth-guest-btn"
-                  onClick={handleDemoGuest}
-                  disabled={loading}
-                  title="Entrar direto para testar o app"
-                >
-                  <Sparkles size={16} />
-                  <span>Entrar como Convidado (Acesso Imediato)</span>
-                </button>
+                {/* Servidor fechado não aceita convidado: não oferecemos o que vai ser recusado */}
+                {allowGuests !== false && (
+                  <button
+                    type="button"
+                    className="auth-guest-btn"
+                    onClick={handleDemoGuest}
+                    disabled={loading}
+                    title="Entrar direto para testar o app"
+                  >
+                    <Sparkles size={16} />
+                    <span>Entrar como Convidado (Acesso Imediato)</span>
+                  </button>
+                )}
 
                 <div className="auth-switch-text">
                   <span>Precisando de uma conta? </span>
@@ -161,12 +183,31 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLogin }) => {
             <>
               <div className="auth-header">
                 <h2 className="auth-title">Criar uma conta</h2>
-                <p className="auth-subtitle">Traga suas ideias para o DasCord.</p>
+                <p className="auth-subtitle">
+                  {requireInvite
+                    ? 'Este servidor é fechado: use o convite que te trouxe até aqui.'
+                    : 'Traga suas ideias para o DasCord.'}
+                </p>
               </div>
 
               {error && <AuthError message={error} />}
 
               <form onSubmit={handleSubmit} className="auth-form">
+                <div className="auth-field">
+                  <label className="auth-label">
+                    <Ticket size={13} /> Convite{' '}
+                    {requireInvite ? <span className="auth-req">*</span> : <span className="auth-optional">(opcional)</span>}
+                  </label>
+                  <input
+                    type="text"
+                    className="auth-input"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="Código ou link do convite"
+                    required={requireInvite === true}
+                  />
+                </div>
+
                 <div className="auth-field">
                   <label className="auth-label">
                     E-mail <span className="auth-req">*</span>

@@ -20,6 +20,42 @@ npm run tauri dev
 
 As variáveis de ambiente estão documentadas em `.env.example`.
 
+## Instalação fechada (servidor exposto na internet)
+
+Os padrões do servidor são de desenvolvimento: cadastro aberto, convidado anônimo liberado
+e todo mundo entrando no servidor padrão. Numa máquina alcançável pela internet, ligue as
+três variáveis abaixo — o servidor imprime as regras na subida, para não restar dúvida:
+
+```bash
+DASCORD_REQUIRE_INVITE=1     # cadastro só com convite válido
+DASCORD_ALLOW_GUESTS=0       # sem convidado anônimo
+DASCORD_AUTO_JOIN_DEFAULT=0  # quem chega entra só no servidor de quem convidou
+DASCORD_BEHIND_PROXY=1       # o IP real vem do proxy reverso, em X-Forwarded-For
+```
+
+`GET /api/version` devolve `requireInvite` e `allowGuests`, e a tela de login se adapta:
+sem convidado, o botão some; com convite obrigatório, o campo passa a ser exigido.
+
+> **`DASCORD_BEHIND_PROXY` só com proxy de verdade na frente.** Ligado sem proxy, qualquer
+> requisição pode mandar o cabeçalho `X-Forwarded-For` e escolher o próprio "IP", o que
+> desmonta todos os limites por endereço.
+
+**O primeiro convite** precisa sair de dentro: crie a sua conta com o servidor ainda aberto
+(ou use uma conta que já existe), gere um convite pelo menu do servidor e só então suba com
+as variáveis acima.
+
+### Limites por endereço de IP
+
+| O quê | Limite |
+| --- | --- |
+| Cadastro | 5 por hora |
+| Entrada como convidado | 10 por hora |
+| Tentativas de login | 20 a cada 15 minutos |
+| Envio de imagens | 60 por hora |
+
+Os contadores ficam em memória: reiniciar o servidor zera todos. São proteção contra rajada
+e abuso casual, não cotas de uso.
+
 ## Voz: servidor de mídia (SFU)
 
 A voz funciona de dois jeitos:

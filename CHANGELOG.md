@@ -16,6 +16,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Transmissão de tela** nos canais de voz: escolha de qualidade (720p30, 1080p30 ou 1080p60, ajustável durante a transmissão), selo "AO VIVO" e contador de quem está assistindo.
 - Quem está na chamada escolhe **assistir** cada transmissão; o vídeo só é enviado para quem pediu.
 
+### Segurança
+- **Instalação fechada**, para quando o servidor fica exposto na internet: cadastro só com convite (`DASCORD_REQUIRE_INVITE`), entrada como convidado desligável (`DASCORD_ALLOW_GUESTS`) e fim da entrada automática no servidor padrão (`DASCORD_AUTO_JOIN_DEFAULT`). Quem chega por convite entra no servidor de quem convidou. Os padrões continuam abertos, como em desenvolvimento.
+- **Limite por endereço de IP** em cadastro, entrada como convidado, login e envio de imagens. O limite de login por conta continua valendo: um protege a senha, o outro impede varrer várias contas do mesmo lugar.
+- O servidor passa a **enxergar o IP real** de quem chega (`ConnectInfo`), inclusive atrás de proxy reverso via `X-Forwarded-For` — mas só quando `DASCORD_BEHIND_PROXY` está ligado, para o cabeçalho não virar um IP escolhido por quem chama.
+- `GET /api/version` informa as regras de entrada, para a tela de login não oferecer o que o servidor recusa.
+
 ### Alterado
 - As conexões de voz renegociam durante a chamada ("perfect negotiation"), o que também corrige o áudio de quem entra num canal onde alguém estava sem microfone liberado.
 - Mudo e ensurdecido agora chegam aos outros participantes; antes o ícone do microfone ficava desatualizado.

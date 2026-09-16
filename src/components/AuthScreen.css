@@ -132,10 +132,21 @@
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  /* Alguns rótulos levam ícone (convite): mantém texto e ícone na mesma linha */
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .auth-req {
   color: var(--danger);
+}
+
+.auth-optional {
+  color: var(--text-subtle);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .auth-input {

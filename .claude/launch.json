@@ -17,6 +17,15 @@
       "port": 3001
     },
     {
+      "name": "dascord-server-fechado",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set DASCORD_REQUIRE_INVITE=1&& set DASCORD_ALLOW_GUESTS=0&& set DASCORD_AUTO_JOIN_DEFAULT=0&& cargo run --manifest-path server/Cargo.toml"
+      ],
+      "port": 3001
+    },
+    {
       "name": "dascord-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],

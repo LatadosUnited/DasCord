@@ -64,6 +64,9 @@ pub struct RegisterRequest {
     #[serde(rename = "displayName")]
     pub display_name: Option<String>,
     pub password: String,
+    /// Código ou link de convite. Obrigatório quando o servidor exige convite.
+    #[serde(rename = "inviteCode", default)]
+    pub invite_code: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
