@@ -27,6 +27,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `GET /api/version` informa as regras de entrada, para a tela de login não oferecer o que o servidor recusa.
 
 ### Alterado
+- **O `main.rs` do servidor deixou de ser dono de tudo.** Eram 1969 linhas: as 35 rotas, os handlers de todos os assuntos, o upload de imagem e o protocolo inteiro do WebSocket num arquivo só, com regra de negócio misturada ao transporte. Cada assunto virou um arquivo em `server/src/routes`, o WebSocket foi para `ws.rs`, e o que mais de um módulo usa ficou em arquivos pequenos: `state.rs` (estado e respostas curtas), `events.rs` (quem recebe cada evento), `presence.rs` e `uploads.rs`. O `main.rs` agora só sobe o processo. Nada muda no comportamento do servidor.
 - **O `App.tsx` deixou de ser dono de tudo.** Era um componente de 979 linhas com 23 estados, que cuidava ao mesmo tempo de sessão, servidores, canais, mensagens, voz, amigos e digitação — mexer em um assunto obrigava a entender os outros. O estado foi para um hook por assunto em `src/hooks`, e o despacho dos eventos do WebSocket, que era um `if/else` de 130 linhas, virou uma tabela que só liga cada evento ao domínio dono dele. Nada muda para quem usa o app.
 - As conexões de voz renegociam durante a chamada ("perfect negotiation"), o que também corrige o áudio de quem entra num canal onde alguém estava sem microfone liberado.
 - Mudo e ensurdecido agora chegam aos outros participantes; antes o ícone do microfone ficava desatualizado.
