@@ -80,6 +80,19 @@ O app pergunta ao abrir e a cada 6 horas. Havendo versão nova, aparece um aviso
 "Atualizar agora": ele baixa, confere a assinatura, instala e reinicia sozinho. No navegador
 o aviso nunca aparece — atualização é coisa do app desktop.
 
+### Para quem o instalador aponta
+
+`VITE_API_URL` é gravado no build. **Sem ele, o app sai apontando para `http://localhost:3001`**
+e não conecta em nada na máquina de quem instalar. Antes de gerar um instalador para distribuir,
+tenha um `.env` (ou a variável no ambiente) com o endereço do servidor de verdade:
+
+```
+VITE_API_URL=https://srv1915663.hstgr.cloud
+```
+
+O mesmo vale para o `dist/` do app web na VPS — o `scripts/deploy.sh` cuida disso sozinho, lendo
+o `DASCORD_PUBLIC_URL` do serviço.
+
 ### Assinando o build
 
 Os apps só aceitam instalador assinado com a chave do projeto. A chave pública está em

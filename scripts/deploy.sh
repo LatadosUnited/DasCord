@@ -93,9 +93,17 @@ atualizar_servidor() {
   echo "→ Compilando o servidor (demora alguns minutos)"
   remoto "cd '$REMOTE_DIR' && . \"\$HOME/.cargo/env\" && cargo build --release --manifest-path server/Cargo.toml"
 
+  # O endereço do servidor é gravado no bundle na hora do build. Sem ele, o padrão
+  # é localhost:3001 e o app web sai tentando falar com a máquina de quem abriu —
+  # por isso ele vem do próprio serviço, e não de um .env que pode não existir.
+  local public_url
+  public_url="$(remoto "systemctl show -p Environment --value '$SERVICE' | tr ' ' '
+' | grep '^DASCORD_PUBLIC_URL=' | tail -1 | cut -d= -f2-")"
+  [ -n "$public_url" ] || { echo "Não achei DASCORD_PUBLIC_URL no serviço $SERVICE." >&2; exit 1; }
+
   # O nginx serve dist/ direto do disco: sem refazer, a versão web fica na do dia anterior
-  echo "→ Recompilando o app web (dist/)"
-  remoto "cd '$REMOTE_DIR' && npm ci --silent && npm run build"
+  echo "→ Recompilando o app web (dist/) apontando para $public_url"
+  remoto "cd '$REMOTE_DIR' && npm ci --silent && VITE_API_URL='$public_url' npm run build"
 
   echo "→ Reiniciando $SERVICE (derruba as conexões abertas, inclusive as chamadas de voz)"
   remoto "systemctl restart '$SERVICE' && sleep 2 && systemctl is-active '$SERVICE'"

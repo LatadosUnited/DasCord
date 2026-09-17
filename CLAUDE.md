@@ -52,6 +52,9 @@ em `.claude/launch.json`.
 
 - **Voz mexe nos dois motores.** Uma mudança de comportamento em `webrtc.ts` (P2P) quase sempre
   precisa do equivalente em `sfuVoice.ts` (LiveKit) — o SFU é o que está em produção.
+- **Build sem `VITE_API_URL` aponta para `localhost:3001`.** Vale para o instalador e para o
+  `dist/` da VPS: o endereço entra no bundle na hora do build, e o padrão silencioso faz o app
+  tentar falar com a máquina de quem abriu. O `deploy.sh` lê o `DASCORD_PUBLIC_URL` do serviço.
 - **O build não avisa direito quando não assina.** Sem `TAURI_SIGNING_PRIVATE_KEY` (o conteúdo
   da chave; a variável `..._PATH` é ignorada), `npm run tauri build` gera os instaladores, imprime
   "no private key" no fim e ainda assim sai com código 0. Confira se os `.sig` foram gerados.
