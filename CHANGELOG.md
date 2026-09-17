@@ -5,6 +5,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.2.1] - 2026-09-17
+
 ### Adicionado
 - **O app se atualiza sozinho**: ao abrir (e a cada 6 horas), ele pergunta ao servidor se há versão nova. Havendo, um aviso oferece "Atualizar agora", com o progresso do download ali mesmo; ao terminar, o app reinicia já na versão nova. Só instalador assinado com a chave do projeto é aceito.
 - **Servidor distribui as atualizações do app**: `GET /api/update/{plataforma}/{arquitetura}/{versão}` responde no formato do updater do Tauri, e os instaladores saem de `/updates/`. Para publicar uma versão, basta copiar o instalador, o `.sig` e o `latest.json` para a pasta `updates` dos dados, sem reiniciar.
