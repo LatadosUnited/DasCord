@@ -123,9 +123,18 @@ Os apps só aceitam instalador assinado com a chave do projeto. A chave pública
 # No Windows, em PowerShell. A chave vai pelo conteúdo, não pelo caminho:
 # a CLI ignora TAURI_SIGNING_PRIVATE_KEY_PATH aqui.
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$HOME\.tauri\dascord.key" -Raw
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 npm run tauri build
 ```
+
+> **Não tente passar a senha vazia pelo ambiente.** No Windows, `$env:VAR = ""` apaga a variável
+> em vez de defini-la vazia, então a CLI não acha senha nenhuma e para esperando você digitar —
+> num build automatizado isso trava para sempre, depois de já ter gerado os instaladores.
+> Se o build parar em "Decrypting updater signing key, expect a prompt for password", foi isso.
+> Assine os arquivos depois do build, que aí a senha vazia vai como argumento e funciona:
+>
+> ```powershell
+> npx tauri signer sign -f "$HOME\.tauri\dascord.key" -p "" <arquivo>
+> ```
 
 O build gera o instalador e o `.sig` ao lado dele, em `src-tauri/target/release/bundle/`.
 
