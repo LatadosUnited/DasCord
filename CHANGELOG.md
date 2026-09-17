@@ -9,7 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 - **Primeiro pedaço do co-op remoto**: em Configurações > Jogar Junto, um teste que cria um controle de Xbox 360 virtual nesta máquina e espelha nele um controle plugado aqui. É o caminho que o controle de um amigo vai percorrer quando a sessão de co-op existir — por ele passa só estado de controle, nunca teclado ou mouse. Ainda não dá para jogar com ninguém: falta a parte que leva o controle pela rede.
-- **O driver do controle virtual vai junto do app.** A aba Jogar Junto percebe quando o ViGEmBus não está instalado e oferece um botão que abre o instalador ali mesmo — ele só roda quando você clica, e só quem hospeda a sessão precisa dele. Quem entra para jogar não instala nada.
+- **O driver do controle virtual vai junto do app.** A aba Jogar Junto percebe quando o ViGEmBus não está instalado e instala com um clique: só aparece o aviso do Windows, sem janela de instalador, e a aba já confere sozinha no fim. Ele só roda quando você clica, e só quem hospeda a sessão precisa dele — quem entra para jogar não instala nada.
 
 ### Segurança
 - **A chave do servidor de voz saiu do repositório.** `livekit/livekit.yaml` era versionado com um par de chaves de desenvolvimento, e é esse par que autoriza entrar em qualquer canal de voz — quem lesse o repositório entrava nas chamadas, e cada `git pull` do deploy trazia a chave de volta. Agora só o `livekit.yaml.example` fica no git; o arquivo real é criado na máquina, com um par gerado ali.

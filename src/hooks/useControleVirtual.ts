@@ -27,7 +27,7 @@ export function useControleVirtual() {
   const [ligado, setLigado] = useState(false);
   const [origem, setOrigem] = useState<string | null>(null);
   const [estado, setEstado] = useState<EstadoControle>(CONTROLE_NEUTRO);
-  // Ligado depois de abrir o instalador: a aba passa a oferecer "Verificar de novo"
+  // Enquanto o instalador do driver roda: pode levar alguns segundos depois do UAC
   const [instalando, setInstalando] = useState(false);
 
   const quadroRef = useRef<number | null>(null);
@@ -53,16 +53,19 @@ export function useControleVirtual() {
     verificar();
   }, [verificar]);
 
-  /** O instalador roda elevado e em outro processo: aqui só resta pedir para conferir depois */
+  /** Instala sem janela de instalador e confere sozinho no fim: a pessoa só vê o UAC */
   const instalar = useCallback(async () => {
     setErro(null);
+    setInstalando(true);
     try {
       await instalarDriver();
-      setInstalando(true);
+      await verificar();
     } catch (e) {
       setErro((e as Error).message);
+    } finally {
+      setInstalando(false);
     }
-  }, []);
+  }, [verificar]);
 
   const pararEspelho = useCallback(() => {
     if (quadroRef.current !== null) cancelAnimationFrame(quadroRef.current);

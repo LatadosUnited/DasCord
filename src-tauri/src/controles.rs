@@ -176,18 +176,17 @@ pub fn controle_virtual_desconectar_todos(controles: State<'_, ControlesVirtuais
 #[cfg(windows)]
 const INSTALADOR_DRIVER: &str = "resources/ViGEmBus_1.22.0_x64_x86_arm64.exe";
 
-/// Dispara o instalador do ViGEmBus que veio junto do app. Não espera terminar: quem
-/// diz se deu certo é o `controle_virtual_verificar` depois, porque o instalador roda
-/// elevado, em outro processo, e cancelar o UAC daqui não é erro do nosso lado.
+/// Instala o ViGEmBus que veio junto do app, sem janela de instalador: a pessoa vê
+/// um UAC e nada mais. Espera terminar para poder dizer se deu certo.
+///
+/// O instalador é um pacote WiX, e `/quiet` não está documentado no projeto — por isso,
+/// se a instalação silenciosa falhar, caímos para o instalador com a janela dele em vez
+/// de deixar a pessoa sem saída.
 #[cfg(windows)]
 #[tauri::command]
 pub fn controle_virtual_instalar_driver(app: tauri::AppHandle) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     use tauri::path::BaseDirectory;
     use tauri::Manager;
-
-    /// Sem isso, o console do PowerShell pisca na cara da pessoa
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let caminho = app
         .path()
@@ -196,22 +195,53 @@ pub fn controle_virtual_instalar_driver(app: tauri::AppHandle) -> Result<(), Str
     if !caminho.exists() {
         return Err("O instalador do driver não veio com este app.".to_string());
     }
+    let caminho = caminho.to_string_lossy().to_string();
+
+    match instalar(&caminho, true) {
+        Ok(()) => Ok(()),
+        // Pode ser UAC recusado ou `/quiet` não suportado; nos dois casos a janela do
+        // instalador é o caminho que sempre funciona
+        Err(_) => instalar(&caminho, false),
+    }
+}
+
+/// Roda o instalador elevado e devolve o que o código de saída disse
+#[cfg(windows)]
+fn instalar(caminho: &str, silencioso: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    /// Sem isso, o console do PowerShell pisca na cara da pessoa
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    /// O instalador terminou, mas o driver só entra de fato depois de reiniciar
+    const REINICIAR_NECESSARIO: i32 = 3010;
 
     // O instalador pede elevação pelo manifesto dele, e o CreateProcess do Command não
     // sabe elevar — daí o Start-Process, que passa pelo shell e mostra o UAC
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Start-Process -Verb RunAs -FilePath $args[0]",
-            "--",
-        ])
-        .arg(&caminho)
+    let argumentos = if silencioso {
+        " -ArgumentList '/quiet','/norestart'"
+    } else {
+        ""
+    };
+    let script = format!(
+        "$p = Start-Process -Verb RunAs -Wait -PassThru -FilePath $args[0]{argumentos}; exit $p.ExitCode"
+    );
+
+    let saida = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script, "--", caminho])
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
+        .status()
         .map_err(|e| format!("Não foi possível abrir o instalador do driver: {e}"))?;
-    Ok(())
+
+    match saida.code() {
+        Some(0) => Ok(()),
+        Some(REINICIAR_NECESSARIO) => {
+            Err("O driver foi instalado, mas só vale depois de reiniciar o computador.".to_string())
+        }
+        Some(codigo) => Err(format!(
+            "A instalação do driver não terminou (código {codigo}). Se você cancelou o aviso do Windows, tente de novo."
+        )),
+        None => Err("A instalação do driver foi interrompida.".to_string()),
+    }
 }
 
 #[cfg(not(windows))]

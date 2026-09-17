@@ -37,21 +37,16 @@ export const CoopTab: FC = () => {
       {driver === 'ausente' && (
         <div className="settings-notice coop-aviso">
           <AlertTriangle size={16} />
-          <span>
-            {erro}
-            {instalando && ' Termine a instalação na janela que abriu e confira aqui de novo.'}
-          </span>
+          <span>{instalando ? 'Instalando o driver. Aceite o aviso do Windows e aguarde.' : erro}</span>
           <div className="coop-acoes">
-            <button className="btn fit" onClick={instalar}>
+            <button className="btn fit" onClick={instalar} disabled={instalando}>
               <Download size={14} />
-              Instalar driver
+              {instalando ? 'Instalando…' : 'Instalar driver'}
             </button>
-            {instalando && (
-              <button className="btn secondary fit" onClick={verificar}>
-                <RefreshCw size={14} />
-                Verificar de novo
-              </button>
-            )}
+            <button className="btn secondary fit" onClick={verificar} disabled={instalando}>
+              <RefreshCw size={14} />
+              Verificar de novo
+            </button>
           </div>
         </div>
       )}
