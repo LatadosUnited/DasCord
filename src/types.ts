@@ -1,6 +1,6 @@
 export type UserStatus = 'online' | 'idle' | 'dnd' | 'offline';
 
-export type SettingsTab = 'account' | 'profile' | 'voice';
+export type SettingsTab = 'account' | 'profile' | 'voice' | 'coop';
 
 export interface User {
   id: string;

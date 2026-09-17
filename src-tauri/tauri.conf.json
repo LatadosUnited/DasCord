@@ -40,6 +40,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "resources": [
+      "resources/ViGEmBus_1.22.0_x64_x86_arm64.exe"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -40,6 +40,7 @@ fn send_message_native(payload: ChatMessagePayload) -> Result<ChatMessagePayload
     Ok(payload)
 }
 
+mod controles;
 mod snowflake;
 use snowflake::SnowflakeGenerator;
 use std::sync::LazyLock;
@@ -63,11 +64,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(controles::ControlesVirtuais::default())
         .invoke_handler(tauri::generate_handler![
             get_system_stats,
             send_message_native,
             generate_snowflake,
-            extract_snowflake_time
+            extract_snowflake_time,
+            controles::controle_virtual_verificar,
+            controles::controle_virtual_conectar,
+            controles::controle_virtual_atualizar,
+            controles::controle_virtual_desconectar,
+            controles::controle_virtual_desconectar_todos,
+            controles::controle_virtual_instalar_driver
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

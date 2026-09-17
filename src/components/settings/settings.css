@@ -613,3 +613,106 @@
   accent-color: var(--brand);
   cursor: pointer;
 }
+
+/* ---------- Jogar Junto ---------- */
+
+.coop-acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coop-monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+}
+
+.coop-luzes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coop-luz {
+  min-width: 34px;
+  padding: 5px 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+}
+
+.coop-luz.ativa {
+  color: var(--on-brand);
+  background-color: var(--brand);
+  border-color: var(--brand);
+}
+
+.coop-eixos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coop-eixo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coop-barra {
+  position: relative;
+  display: flex;
+  height: 8px;
+  background-color: var(--input-bg);
+  border-radius: 4px;
+}
+
+/* O ponto anda de ponta a ponta da barra acompanhando o analógico */
+.coop-barra i {
+  position: absolute;
+  top: -2px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background-color: var(--brand);
+  border-radius: 50%;
+}
+
+/* Os dois gatilhos dividem a barra: o esquerdo cresce para a esquerda */
+.coop-barra.dupla {
+  justify-content: center;
+}
+
+.coop-barra.dupla b {
+  height: 100%;
+  background-color: var(--brand);
+}
+
+.coop-barra.dupla b:first-child {
+  border-radius: 4px 0 0 4px;
+  transform: scaleX(-1);
+  transform-origin: right;
+}
+
+.coop-barra.dupla b:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+/* O aviso do driver ganha os botões embaixo do texto, não ao lado */
+.settings-notice.coop-aviso {
+  flex-wrap: wrap;
+}
+
+.settings-notice.coop-aviso .coop-acoes {
+  width: 100%;
+  padding-left: 26px;
+}

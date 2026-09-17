@@ -1,8 +1,9 @@
 import { FC, useEffect, useState } from 'react';
-import { LogOut, Mic, Palette, User as UserIcon, X } from 'lucide-react';
+import { Gamepad2, LogOut, Mic, Palette, User as UserIcon, X } from 'lucide-react';
 import { SettingsTab, User } from '../types';
 import { AccountTab } from './settings/AccountTab';
 import { ProfileTab } from './settings/ProfileTab';
+import { CoopTab } from './settings/CoopTab';
 import { VoiceTab } from './settings/VoiceTab';
 import { APP_VERSION } from '../services/version';
 import './settings/settings.css';
@@ -34,7 +35,10 @@ const GROUPS: { title: string; tabs: TabInfo[] }[] = [
   },
   {
     title: 'Configurações do app',
-    tabs: [{ id: 'voice', label: 'Voz e Áudio', icon: Mic }],
+    tabs: [
+      { id: 'voice', label: 'Voz e Áudio', icon: Mic },
+      { id: 'coop', label: 'Jogar Junto', icon: Gamepad2 },
+    ],
   },
 ];
 
@@ -42,6 +46,7 @@ const TAB_TITLE: Record<SettingsTab, string> = {
   account: 'Minha Conta',
   profile: 'Perfil',
   voice: 'Voz e Áudio',
+  coop: 'Jogar Junto',
 };
 
 export const SettingsModal: FC<SettingsModalProps> = ({
@@ -136,6 +141,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
             />
           )}
           {tab === 'voice' && <VoiceTab />}
+          {tab === 'coop' && <CoopTab />}
         </div>
 
         {/* O botão de fechar acompanha a rolagem, como no Discord */}
