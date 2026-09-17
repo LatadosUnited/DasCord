@@ -1,6 +1,7 @@
 import { FC } from 'react';
 import { Cpu, Zap, Minus, Square, X, LogOut, Lightbulb } from 'lucide-react';
 import { SystemStats } from '../types';
+import { RUNS_IN_TAURI, closeWindow, minimizeWindow, toggleMaximizeWindow } from '../services/appWindow';
 import './TitleBar.css';
 
 interface TitleBarProps {
@@ -49,15 +50,20 @@ export const TitleBar: FC<TitleBarProps> = ({ stats, serverOnline, onOpenStats, 
             <LogOut size={13} />
           </button>
         )}
-        <button className="titlebar-btn" title="Minimizar">
-          <Minus size={14} />
-        </button>
-        <button className="titlebar-btn" title="Maximizar">
-          <Square size={12} />
-        </button>
-        <button className="titlebar-btn close" title="Fechar">
-          <X size={14} />
-        </button>
+        {/* Só no app: no navegador quem manda na janela é o próprio navegador */}
+        {RUNS_IN_TAURI && (
+          <>
+            <button className="titlebar-btn" title="Minimizar" onClick={minimizeWindow}>
+              <Minus size={14} />
+            </button>
+            <button className="titlebar-btn" title="Maximizar" onClick={toggleMaximizeWindow}>
+              <Square size={12} />
+            </button>
+            <button className="titlebar-btn close" title="Fechar" onClick={closeWindow}>
+              <X size={14} />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
