@@ -165,29 +165,43 @@
   color: var(--on-brand);
 }
 
-/* ---------- Menu de status ---------- */
+/* ---------- Menu de status ----------
+   Primeiro nível: o cartão de perfil, como o popout do Discord. */
 
-.status-menu-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px 12px;
+.status-card {
+  margin-bottom: 8px;
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
-.status-menu-avatar {
-  width: 48px;
-  height: 48px;
+.status-card-banner {
+  height: 56px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-hover));
 }
 
-.status-menu-avatar .status-dot {
-  width: 14px;
-  height: 14px;
-  border-width: 3px;
+/* Sobe metade da altura para montar na faixa, como no Discord.
+   O seletor leva o .status-menu junto porque .avatar-wrapper (32px) vem depois
+   no arquivo compartilhado e ganharia de um seletor de uma classe só. */
+.status-menu .status-card-avatar {
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 12px;
+  border: 5px solid var(--bg-secondary);
+  border-radius: 50%;
+  background-color: var(--bg-secondary);
 }
 
-.status-menu-names {
+.status-menu .status-card-avatar .status-dot {
+  width: 16px;
+  height: 16px;
+  border-width: 4px;
+}
+
+.status-card-names {
   display: flex;
   flex-direction: column;
+  padding: 6px 12px 0;
   min-width: 0;
 }
 
@@ -203,6 +217,36 @@
 .status-menu-tag {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.status-card-custom {
+  padding: 8px 12px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+/* A linha que abre a lista de status, com o estado atual à mostra */
+.status-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-row-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.status-row:hover .status-row-chevron {
+  color: inherit;
+}
+
+.status-back {
+  font-weight: 600;
 }
 
 .status-option {
