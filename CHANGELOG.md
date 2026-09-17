@@ -5,6 +5,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-09-17
+
+### Adicionado
+- **Primeiro pedaço do co-op remoto**: em Configurações > Jogar Junto, um teste que cria um controle de Xbox 360 virtual nesta máquina e espelha nele um controle plugado aqui. É o caminho que o controle de um amigo vai percorrer quando a sessão de co-op existir — por ele passa só estado de controle, nunca teclado ou mouse. Ainda não dá para jogar com ninguém: falta a parte que leva o controle pela rede.
+- **O driver do controle virtual vai junto do app.** A aba Jogar Junto percebe quando o ViGEmBus não está instalado e oferece um botão que abre o instalador ali mesmo — ele só roda quando você clica, e só quem hospeda a sessão precisa dele. Quem entra para jogar não instala nada.
+
+### Segurança
+- **A chave do servidor de voz saiu do repositório.** `livekit/livekit.yaml` era versionado com um par de chaves de desenvolvimento, e é esse par que autoriza entrar em qualquer canal de voz — quem lesse o repositório entrava nas chamadas, e cada `git pull` do deploy trazia a chave de volta. Agora só o `livekit.yaml.example` fica no git; o arquivo real é criado na máquina, com um par gerado ali.
+- **Errar a senha de alguém não tranca mais o login dessa pessoa.** O bloqueio depois de cinco tentativas valia para a conta inteira, de qualquer lugar: como o nome de usuário é público, bastava errar cinco vezes para deixar alguém de fora por 15 minutos. Agora o bloqueio conta a conta e o endereço juntos, e quem protege a senha contra várias máquinas continua sendo o limite por IP.
+- **O cadastro não diz mais se o e-mail já tem conta.** As mensagens "e-mail já cadastrado" e "nome de usuário em uso" permitiam descobrir, um endereço por vez, quem tem conta aqui; agora as duas colisões dão a mesma resposta.
+- **Uma conexão não consegue mais inundar o servidor.** O WebSocket aceitava mensagem de até 64 MB (padrão da biblioteca) e nenhum limite de ritmo, então uma sessão em laço enchia o banco. Agora são 64 KB por mensagem, 120 eventos e 10 mensagens gravadas a cada 10 segundos, por conexão — folgado o bastante para a rajada de candidatos ICE ao entrar numa chamada.
+- **Chutar código de convite passou a ter limite** (20 por hora por endereço): era o único caminho de entrada sem nenhuma trava.
+- **`signing.key` agora é legível só pelo dono.** O arquivo era criado com a permissão padrão, então qualquer conta da mesma máquina lia o segredo e forjava endereço de imagem do chat. A permissão é apertada também nas chaves que já existiam.
+- **`/health` não conta mais quantas pessoas estão conectadas** nem em que porta o processo escuta: a rota é aberta e isso não é da conta de quem está fora.
+
 ## [0.2.2] - 2026-09-17
 
 ### Corrigido
