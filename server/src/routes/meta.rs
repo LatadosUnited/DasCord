@@ -7,20 +7,21 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 
 use crate::snowflake::SnowflakeGenerator;
 use crate::state::AppState;
 use crate::{MIN_CLIENT_VERSION, SERVER_VERSION};
 
+/// O que `/health` conta a quem pergunta. Quantas pessoas estão conectadas agora
+/// e em que porta o processo escuta não são da conta de quem está fora: a rota é
+/// aberta, e isso serve mais a quem observa o servidor do que a quem o usa.
 #[derive(Serialize)]
 pub struct ServerInfo {
     pub status: String,
     pub service: String,
     pub version: String,
     pub engine: String,
-    pub active_connections: usize,
-    pub port: u16,
 }
 
 #[derive(Serialize)]
@@ -37,15 +38,12 @@ pub async fn root_handler() -> Html<&'static str> {
     )
 }
 
-pub async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let connections = state.active_connections.load(Ordering::Relaxed);
+pub async fn health_handler() -> impl IntoResponse {
     Json(ServerInfo {
         status: "healthy".to_string(),
         service: "dascord-realtime-rust".to_string(),
         version: SERVER_VERSION.to_string(),
         engine: "Axum + Tokio + WebSockets".to_string(),
-        active_connections: connections,
-        port: state.port,
     })
 }
 

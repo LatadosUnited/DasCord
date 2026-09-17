@@ -109,6 +109,16 @@ struct LoginFailures {
     window_start: Instant,
 }
 
+/// Chave do bloqueio por senha errada: conta **e** endereço de quem tentou.
+///
+/// Só pela conta, errar a senha de alguém cinco vezes bastava para trancar o login
+/// legítimo dessa pessoa, de qualquer lugar — e o nome de usuário é público. Com o
+/// IP na chave, o bloqueio pesa sobre quem errou. Quem protege a senha contra várias
+/// máquinas é o limite por IP de `login_limit`, que roda antes disto.
+fn failure_key(login_query: &str, ip: &str) -> String {
+    format!("{login_query}|{ip}")
+}
+
 /// Busca um usuário (conta ou convidado) usando uma conexão já travada
 pub fn public_user_by_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<PublicUser>> {
     let user = conn
@@ -208,18 +218,18 @@ impl AuthStore {
 
         let conn = self.db.conn();
 
-        let email_taken: Option<bool> = conn
+        // A resposta não diz qual dos dois colidiu: separar as mensagens permitia
+        // descobrir, um e-mail por vez, quem tem conta aqui.
+        let taken: Option<()> = conn
             .query_row(
-                "SELECT email = ?1 FROM users WHERE email = ?1 OR username = ?2 LIMIT 1",
+                "SELECT 1 FROM users WHERE email = ?1 OR username = ?2 LIMIT 1",
                 params![email, username],
-                |r| r.get(0),
+                |_| Ok(()),
             )
             .optional()
             .map_err(internal_error)?;
-        match email_taken {
-            Some(true) => return Err("Este e-mail já está cadastrado.".to_string()),
-            Some(false) => return Err("Este nome de usuário já está em uso.".to_string()),
-            None => {}
+        if taken.is_some() {
+            return Err("Este e-mail ou nome de usuário já está em uso.".to_string());
         }
 
         let id = snowflake.next_id_string();
@@ -246,10 +256,12 @@ impl AuthStore {
         Ok((token, user))
     }
 
-    pub fn login(&self, req: LoginRequest) -> Result<(String, PublicUser), LoginError> {
+    /// `ip` entra na chave do bloqueio por senha errada: veja `failure_key`.
+    pub fn login(&self, req: LoginRequest, ip: &str) -> Result<(String, PublicUser), LoginError> {
         let login_query = req.login.trim().to_lowercase();
+        let limit_key = failure_key(&login_query, ip);
 
-        if self.is_rate_limited(&login_query) {
+        if self.is_rate_limited(&limit_key) {
             return Err(LoginError::TooManyAttempts);
         }
 
@@ -274,17 +286,17 @@ impl AuthStore {
         let Some(user) = user else {
             // Faz um hash mesmo assim para não revelar, pelo tempo de resposta, se a conta existe
             let _ = Self::hash_password(&req.password);
-            self.record_login_failure(&login_query);
+            self.record_login_failure(&limit_key);
             return Err(LoginError::InvalidCredentials);
         };
 
         let (valid, needs_rehash) = Self::verify_password(&req.password, &user);
         if !valid {
-            self.record_login_failure(&login_query);
+            self.record_login_failure(&limit_key);
             return Err(LoginError::InvalidCredentials);
         }
 
-        self.login_failures.lock().unwrap().remove(&login_query);
+        self.login_failures.lock().unwrap().remove(&limit_key);
 
         // Hash calculado antes de travar o banco
         let new_hash = if needs_rehash { Self::hash_password(&req.password).ok() } else { None };

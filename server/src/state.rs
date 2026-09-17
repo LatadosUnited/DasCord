@@ -59,7 +59,6 @@ pub struct AppState {
     pub servers: ServerStore,
     pub messages: MessageStore,
     pub allowed_origins: Vec<String>,
-    pub port: u16,
     /// Conexões WebSocket abertas por usuário: sem nenhuma, os outros o veem offline
     pub presence: Mutex<HashMap<String, usize>>,
     /// Quem está em cada canal de voz, visível para todos os membros do servidor
@@ -79,11 +78,14 @@ pub struct AppState {
     pub policy: AccessPolicy,
     /// Assina os endereços temporários das imagens do chat
     pub signer: UrlSigner,
-    /// Limites por IP: contas novas, convidados, tentativas de login e uploads
+    /// Limites por IP: contas novas, convidados, tentativas de login, uploads e convites
     pub register_limit: RateLimiter,
     pub guest_limit: RateLimiter,
     pub login_limit: RateLimiter,
     pub upload_limit: RateLimiter,
+    /// Tentativas de usar um código de convite: sem ele, era o único caminho de
+    /// entrada em que dava para chutar código à vontade
+    pub invite_limit: RateLimiter,
 }
 
 /// IP de quem fez a requisição. Atrás de proxy reverso o socket é sempre o do

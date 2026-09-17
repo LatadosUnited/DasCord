@@ -333,12 +333,20 @@ pub async fn create_invite_handler(
 pub async fn accept_invite_handler(
     State(state): State<Arc<AppState>>,
     AxumPath(code): AxumPath<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> JsonReply {
     let (_, user_id) = match require_session(&state, &headers) {
         Ok(session) => session,
         Err(reply) => return reply,
     };
+    // Sem isto, uma sessão qualquer podia varrer códigos de convite de graça
+    if !state.invite_limit.check(&client_ip(&state, &headers, addr)) {
+        return json_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Muitas tentativas de convite deste endereço. Aguarde um pouco.",
+        );
+    }
     match state.servers.accept_invite(&code, &user_id) {
         Ok((server, joined)) => {
             if joined {

@@ -13,7 +13,7 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use serde_json::json;
 use std::{
     sync::{atomic::Ordering, Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
 
@@ -27,6 +27,18 @@ use crate::voice::VoiceMember;
 
 /// Tempo que o servidor espera pela mensagem de autenticação antes de desistir
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Maior mensagem que o servidor aceita pelo WebSocket. O padrão do axum é 64 MiB,
+/// grande demais para o que trafega aqui: o maior evento é uma mensagem de 4000
+/// caracteres com dez anexos.
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+/// Janela dos limites por conexão
+const EVENT_WINDOW: Duration = Duration::from_secs(10);
+/// Eventos de qualquer tipo por janela. Folgado de propósito: ao entrar numa chamada
+/// P2P, a troca de candidatos ICE vem em rajada.
+const MAX_EVENTS_PER_WINDOW: u32 = 120;
+/// Mensagens gravadas no banco por janela. Uma pessoa digitando não chega perto;
+/// um cliente em laço, sim — e cada uma vira uma linha no SQLite.
+const MAX_MESSAGES_PER_WINDOW: u32 = 10;
 
 
 pub async fn ws_handler(
@@ -40,7 +52,47 @@ pub async fn ws_handler(
             return (StatusCode::FORBIDDEN, "Origem não permitida").into_response();
         }
     }
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(|socket| handle_socket(socket, state))
+}
+
+/// Quanto uma conexão já gastou na janela atual. Vale por conexão, e não por
+/// usuário: uma sessão sozinha não derruba o servidor nem enche o disco.
+pub struct EventBudget {
+    window_start: Instant,
+    events: u32,
+    messages: u32,
+    /// Só avisa uma vez por janela, para a rajada não virar enxurrada de log
+    warned: bool,
+}
+
+impl EventBudget {
+    fn new() -> Self {
+        Self {
+            window_start: Instant::now(),
+            events: 0,
+            messages: 0,
+            warned: false,
+        }
+    }
+
+    /// `false` quando o evento passa do limite e deve ser descartado
+    fn allow(&mut self, is_message: bool, user_name: &str) -> bool {
+        if self.window_start.elapsed() > EVENT_WINDOW {
+            *self = Self::new();
+        }
+        self.events += 1;
+        if is_message {
+            self.messages += 1;
+        }
+        let within = self.events <= MAX_EVENTS_PER_WINDOW
+            && (!is_message || self.messages <= MAX_MESSAGES_PER_WINDOW);
+        if !within && !self.warned {
+            self.warned = true;
+            eprintln!("🚧 Limite de eventos do WebSocket atingido por {}.", user_name);
+        }
+        within
+    }
 }
 
 /// A primeira mensagem do cliente precisa ser {"type":"auth","token":"..."}
@@ -119,9 +171,12 @@ pub async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let recv_state = state.clone();
     let recv_voice_channel = voice_channel.clone();
     let mut recv_task = tokio::spawn(async move {
+        let mut budget = EventBudget::new();
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
-                Message::Text(text) => handle_client_event(&recv_state, &user, conn_id, &text, &recv_voice_channel),
+                Message::Text(text) => {
+                    handle_client_event(&recv_state, &user, conn_id, &text, &recv_voice_channel, &mut budget)
+                }
                 Message::Close(_) => break,
                 // Ping/Pong são respondidos pelo axum; binário não é usado
                 _ => {}
@@ -170,6 +225,7 @@ pub fn handle_client_event(
     conn_id: u64,
     text: &str,
     voice_channel: &Mutex<Option<String>>,
+    budget: &mut EventBudget,
 ) {
     let Ok(mut event) = serde_json::from_str::<serde_json::Value>(text) else {
         return;
@@ -185,6 +241,9 @@ pub fn handle_client_event(
     }
 
     if channel_id.len() > MAX_CHANNEL_ID_LEN {
+        return;
+    }
+    if !budget.allow(kind == "message", &user.name) {
         return;
     }
 

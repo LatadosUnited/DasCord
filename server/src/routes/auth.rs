@@ -105,7 +105,7 @@ pub async fn login_handler(
     }
 
     let st = state.clone();
-    let result = tokio::task::spawn_blocking(move || st.auth.login(payload)).await;
+    let result = tokio::task::spawn_blocking(move || st.auth.login(payload, &ip)).await;
 
     match result {
         Ok(Ok((token, user))) => auth_success(StatusCode::OK, token, user),

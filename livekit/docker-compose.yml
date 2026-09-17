@@ -1,4 +1,10 @@
 # Servidor de mídia (SFU) da voz do DasCord.
+#
+# Antes da primeira subida, crie o arquivo de chaves a partir do modelo — ele fica
+# fora do git justamente para a chave da voz não andar junto com o código:
+#   cp livekit/livekit.yaml.example livekit/livekit.yaml
+#   docker run --rm livekit/livekit-server generate-keys   # e cole o par em keys:
+#
 # Suba com:  docker compose -f livekit/docker-compose.yml up -d
 services:
   livekit:

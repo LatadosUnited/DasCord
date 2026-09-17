@@ -65,9 +65,25 @@ enviado** — as linhas antigas são convertidas sozinhas na primeira subida.
 | Entrada como convidado | 10 por hora |
 | Tentativas de login | 20 a cada 15 minutos |
 | Envio de imagens | 60 por hora |
+| Uso de código de convite | 20 por hora |
 
 Os contadores ficam em memória: reiniciar o servidor zera todos. São proteção contra rajada
 e abuso casual, não cotas de uso.
+
+Além deles, errar a senha cinco vezes em 15 minutos tranca novas tentativas — a conta **e** o
+endereço juntos. Só pela conta, errar a senha de alguém bastava para trancar o login legítimo
+dessa pessoa, e o nome de usuário é público.
+
+### Limites por conexão WebSocket
+
+| O quê | Limite |
+| --- | --- |
+| Tamanho de uma mensagem | 64 KB |
+| Eventos de qualquer tipo | 120 a cada 10 segundos |
+| Mensagens gravadas no banco | 10 a cada 10 segundos |
+
+O evento que passa do limite é descartado, sem derrubar a conexão. O limite de eventos é
+folgado de propósito: ao entrar numa chamada P2P, a troca de candidatos ICE vem em rajada.
 
 ## Atualizações do app
 
@@ -192,16 +208,27 @@ A voz funciona de dois jeitos:
 Para ligar o SFU:
 
 ```bash
-# 1. Suba o LiveKit (portas 7880, 7881 e 7882/udp)
+# 1. Crie o arquivo de chaves a partir do modelo e gere um par só seu
+cp livekit/livekit.yaml.example livekit/livekit.yaml
+docker run --rm livekit/livekit-server generate-keys   # cole o par em keys:
+
+# 2. Suba o LiveKit (portas 7880, 7881 e 7882/udp)
 docker compose -f livekit/docker-compose.yml up -d
 
-# 2. Aponte o servidor Rust para ele (veja .env.example)
-#    LIVEKIT_URL=ws://localhost:7880  LIVEKIT_API_KEY=devkey  LIVEKIT_API_SECRET=dascord-dev-secret-troque-antes-de-expor
+# 3. Aponte o servidor Rust para ele com o MESMO par (veja .env.example)
+#    LIVEKIT_URL=ws://localhost:7880  LIVEKIT_API_KEY=...  LIVEKIT_API_SECRET=...
 ```
 
 O app pede um token temporário em `GET /api/voice/token?channelId=...`, e só recebe se tiver acesso ao canal. A chave secreta fica **só** no servidor Rust. Se esse endereço responder 503, o app volta sozinho para P2P.
 
-As chaves de `livekit/livekit.yaml` são de desenvolvimento: troque antes de expor o servidor.
+O preview `dascord-server-sfu` só define `LIVEKIT_URL`: o par de chaves vem do ambiente da
+máquina (`LIVEKIT_API_KEY` e `LIVEKIT_API_SECRET`), para não voltar a morar num arquivo do
+repositório. Sem ele no ambiente, o servidor sobe sem SFU e a voz usa P2P.
+
+> **`livekit/livekit.yaml` não entra no git** (só o `.example`). Esse par de chaves é o que
+> autoriza entrar em qualquer canal de voz: versionado, ele voltaria sozinho a cada `git pull`
+> do deploy, e quem lesse o repositório entraria nas chamadas. Numa máquina que já rodou com
+> a chave antiga de desenvolvimento, gere um par novo e reinicie o LiveKit **e** o servidor Rust.
 
 ## Versionamento
 

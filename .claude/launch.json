@@ -16,7 +16,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set LIVEKIT_URL=ws://localhost:7880&& set LIVEKIT_API_KEY=devkey&& set LIVEKIT_API_SECRET=dascord-dev-secret-troque-antes-de-expor&& cargo run --manifest-path server/Cargo.toml"
+        "set LIVEKIT_URL=ws://localhost:7880&& cargo run --manifest-path server/Cargo.toml"
       ],
       "port": 3001
     },

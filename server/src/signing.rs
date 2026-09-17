@@ -38,6 +38,8 @@ impl UrlSigner {
         let key_path = data_dir.join("signing.key");
         if let Ok(saved) = std::fs::read(&key_path) {
             if saved.len() >= 32 {
+                // Também aperta a chave que já existia, criada antes desta correção
+                Self::restrict_to_owner(&key_path);
                 return Self { secret: saved };
             }
         }
@@ -49,11 +51,27 @@ impl UrlSigner {
                 key_path.display(),
                 e
             );
+        } else {
+            Self::restrict_to_owner(&key_path);
         }
         Self {
             secret: generated.into_bytes(),
         }
     }
+
+    /// Deixa o arquivo legível só pelo dono. Com a permissão padrão (0644), qualquer
+    /// conta local da máquina lê o segredo e passa a forjar endereço de anexo.
+    #[cfg(unix)]
+    fn restrict_to_owner(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            eprintln!("⚠️ Não foi possível restringir {}: {}", path.display(), e);
+        }
+    }
+
+    /// No Windows a herança de ACL da pasta já é o esperado
+    #[cfg(not(unix))]
+    fn restrict_to_owner(_path: &Path) {}
 
     fn mac(&self, attachment_id: &str, expires_at: i64) -> Vec<u8> {
         // O segredo tem tamanho livre: o HMAC aceita qualquer chave

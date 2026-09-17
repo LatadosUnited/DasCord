@@ -17,6 +17,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Chaves do servidor de mídia (o modelo fica em livekit/livekit.yaml.example)
+livekit/livekit.yaml
+
 # Servidor Rust: build e dados locais (banco com e-mails, hashes de senha e mensagens)
 server/target
 server/data

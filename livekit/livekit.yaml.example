@@ -13,8 +13,14 @@ rtc:
   node_ip: 127.0.0.1
   use_external_ip: false
 
-# Chaves de desenvolvimento. TROQUE antes de expor o servidor:
-# gere com  docker run --rm livekit/livekit-server generate-keys
+# Modelo do arquivo: copie para livekit/livekit.yaml, que fica fora do git.
+#
+# O par abaixo é o que autoriza entrar em qualquer canal de voz. Ele NÃO pode ser
+# versionado: um arquivo de chave no repositório volta sozinho a cada `git pull`
+# do deploy, e quem lê o repositório entra nas chamadas.
+#
+# Gere o seu com:
+#   docker run --rm livekit/livekit-server generate-keys
 # e use os mesmos valores em LIVEKIT_API_KEY e LIVEKIT_API_SECRET do servidor Rust.
 keys:
-  devkey: dascord-dev-secret-troque-antes-de-expor
+  SUA_API_KEY: SEU_API_SECRET

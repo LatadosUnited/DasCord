@@ -125,7 +125,6 @@ async fn main() {
         servers: ServerStore::new(db.clone()),
         messages: MessageStore::new(db),
         allowed_origins,
-        port: addr.port(),
         presence: Mutex::new(HashMap::new()),
         voice: VoiceRegistry::default(),
         sfu: SfuConfig::from_env(),
@@ -141,6 +140,7 @@ async fn main() {
         guest_limit: RateLimiter::new("entrada como convidado", 10, Duration::from_secs(60 * 60)),
         login_limit: RateLimiter::new("tentativas de login", 20, Duration::from_secs(15 * 60)),
         upload_limit: RateLimiter::new("envio de imagens", 60, Duration::from_secs(60 * 60)),
+        invite_limit: RateLimiter::new("uso de convite", 20, Duration::from_secs(60 * 60)),
     });
 
     // Imagens escolhidas mas nunca enviadas não ficam ocupando disco para sempre
