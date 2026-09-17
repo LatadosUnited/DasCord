@@ -140,12 +140,25 @@
 /* ---------- Menus do painel (base em styles/shared.css) ---------- */
 
 /* Os menus do painel abrem para cima. A barra lateral corta o que passa dela
-   (overflow: hidden), então aqui a largura é a dela, não a fixa do popover. */
+   (overflow: hidden), então aqui a largura é a dela, não a fixa do popover.
+   O menu de status é a exceção: ele é renderizado fora, num portal. */
 .user-panel .popover-menu {
   bottom: calc(100% + 8px);
   left: 8px;
   right: 8px;
   width: auto;
+}
+
+/* Fora da barra lateral, o menu de status se posiciona sozinho (StatusMenu.tsx)
+   e cobre também a lista de servidores, como o popout do Discord. */
+.status-menu.popover-menu {
+  position: fixed;
+  left: 8px;
+  right: auto;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
 }
 
 .device-name {
@@ -176,7 +189,7 @@
 }
 
 .status-card-banner {
-  height: 56px;
+  height: 64px;
   background: linear-gradient(135deg, var(--brand), var(--brand-hover));
 }
 
@@ -184,9 +197,9 @@
    O seletor leva o .status-menu junto porque .avatar-wrapper (32px) vem depois
    no arquivo compartilhado e ganharia de um seletor de uma classe só. */
 .status-menu .status-card-avatar {
-  width: 64px;
-  height: 64px;
-  margin: -32px 0 0 12px;
+  width: 76px;
+  height: 76px;
+  margin: -38px 0 0 14px;
   border: 5px solid var(--bg-secondary);
   border-radius: 50%;
   background-color: var(--bg-secondary);
@@ -206,7 +219,7 @@
 }
 
 .status-menu-name {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-header);
   overflow: hidden;

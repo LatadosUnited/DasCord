@@ -33,7 +33,11 @@ export const UserPanel: FC<UserPanelProps> = ({
   useEffect(() => {
     if (!openMenu) return;
     const onMouseDown = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpenMenu(null);
+      const alvo = e.target as HTMLElement;
+      // O menu de status é renderizado fora do painel, para passar por cima da
+      // lista de servidores: sem o closest, clicar nele mesmo o fecharia.
+      if (alvo.closest('.status-menu')) return;
+      if (panelRef.current && !panelRef.current.contains(alvo)) setOpenMenu(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpenMenu(null);
@@ -54,6 +58,7 @@ export const UserPanel: FC<UserPanelProps> = ({
       {openMenu === 'status' && (
         <StatusMenu
           user={currentUser}
+          anchorRef={panelRef}
           onChange={onChangePresence}
           onEditProfile={() => onOpenSettings('profile')}
           onClose={close}

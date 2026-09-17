@@ -1,10 +1,13 @@
-import { FC, FormEvent, useState } from 'react';
+import { CSSProperties, FC, FormEvent, JSX, RefObject, useLayoutEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Pencil, Smile, X } from 'lucide-react';
 import { User, UserStatus } from '../types';
 import { MAX_CUSTOM_STATUS_CHARS, STATUS_OPTIONS, statusLabel } from '../services/presence';
 
 interface StatusMenuProps {
   user: User;
+  /** O painel do usuário, que o menu usa para se posicionar logo acima */
+  anchorRef: RefObject<HTMLElement | null>;
   onChange: (status: UserStatus, customStatus: string) => void;
   onEditProfile: () => void;
   onClose: () => void;
@@ -15,8 +18,9 @@ interface StatusMenuProps {
  * o cartão de perfil com as ações; a lista de status fica um nível abaixo, para
  * caber na barra lateral sem virar uma parede de texto.
  */
-export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile, onClose }) => {
+export const StatusMenu: FC<StatusMenuProps> = ({ user, anchorRef, onChange, onEditProfile, onClose }) => {
   const [view, setView] = useState<'perfil' | 'status'>('perfil');
+  const position = useAnchoredPosition(anchorRef);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(user.customStatus ?? '');
 
@@ -47,9 +51,17 @@ export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile,
     </form>
   );
 
+  const wrap = (conteudo: JSX.Element) =>
+    createPortal(
+      <div className="popover-menu status-menu" role="menu" style={position}>
+        {conteudo}
+      </div>,
+      document.body,
+    );
+
   if (view === 'status') {
-    return (
-      <div className="popover-menu status-menu" role="menu">
+    return wrap(
+      <>
         <button className="popover-item status-back" onClick={() => setView('perfil')}>
           <ChevronLeft size={16} />
           <span>Status</span>
@@ -105,12 +117,12 @@ export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile,
             </button>
           )}
         </div>
-      </div>
+      </>,
     );
   }
 
-  return (
-    <div className="popover-menu status-menu" role="menu">
+  return wrap(
+    <>
       <div className="status-card">
         <div className="status-card-banner" />
         <div className="avatar-wrapper status-card-avatar">
@@ -159,6 +171,36 @@ export const StatusMenu: FC<StatusMenuProps> = ({ user, onChange, onEditProfile,
           </>
         )}
       </div>
-    </div>
+    </>,
   );
 };
+
+/**
+ * O menu vive fora da barra lateral, que corta o que passa dela, então ele é
+ * posicionado à mão: encostado na esquerda da janela, por cima da lista de
+ * servidores, e logo acima do painel do usuário.
+ */
+function useAnchoredPosition(anchorRef: RefObject<HTMLElement | null>): CSSProperties {
+  const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    const update = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      setPosition({
+        left: MARGEM,
+        bottom: window.innerHeight - rect.top + 8,
+        maxHeight: rect.top - MARGEM - 16,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [anchorRef]);
+
+  return position;
+}
+
+/** Distância da borda da janela, a mesma que a lista de servidores usa */
+const MARGEM = 8;
