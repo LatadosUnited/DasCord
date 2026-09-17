@@ -31,3 +31,6 @@ server/data
 *.njsproj
 *.sln
 *.sw?
+
+# Grafo do código (regerável com /graphify . --update)
+graphify-out

@@ -53,8 +53,9 @@ banco na primeira subida. **Guarde esse arquivo nos backups**: perdê-lo não pe
 nenhuma, mas invalida na hora todos os endereços que já estavam abertos na tela.
 
 Avatares e ícones de servidor continuam em pastas abertas (`/avatars`, `/icons`): são públicos
-por natureza. Eles ainda guardam a URL inteira no banco, então **trocar de domínio exige
-reescrever `users.avatar` e `servers.icon`**.
+por natureza. O banco guarda só o nome do arquivo e a URL é montada na leitura, a partir de
+`DASCORD_PUBLIC_URL` (esquema v7), então **trocar de domínio não quebra mais o que já foi
+enviado** — as linhas antigas são convertidas sozinhas na primeira subida.
 
 ### Limites por endereço de IP
 
