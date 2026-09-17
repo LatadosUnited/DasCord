@@ -1,5 +1,5 @@
 import { FC, useEffect, useState } from 'react';
-import { Mic, Palette, User as UserIcon, X } from 'lucide-react';
+import { LogOut, Mic, Palette, User as UserIcon, X } from 'lucide-react';
 import { SettingsTab, User } from '../types';
 import { AccountTab } from './settings/AccountTab';
 import { ProfileTab } from './settings/ProfileTab';
@@ -17,11 +17,32 @@ interface SettingsModalProps {
   onUserUpdated: (user: User) => void;
 }
 
-const TABS: { id: SettingsTab; label: string; icon: typeof UserIcon }[] = [
-  { id: 'account', label: 'Minha Conta', icon: UserIcon },
-  { id: 'profile', label: 'Perfil', icon: Palette },
-  { id: 'voice', label: 'Voz e Áudio', icon: Mic },
+interface TabInfo {
+  id: SettingsTab;
+  label: string;
+  icon: typeof UserIcon;
+}
+
+/** Os assuntos em grupos, como no Discord: primeiro a pessoa, depois o app */
+const GROUPS: { title: string; tabs: TabInfo[] }[] = [
+  {
+    title: 'Configurações do usuário',
+    tabs: [
+      { id: 'account', label: 'Minha Conta', icon: UserIcon },
+      { id: 'profile', label: 'Perfil', icon: Palette },
+    ],
+  },
+  {
+    title: 'Configurações do app',
+    tabs: [{ id: 'voice', label: 'Voz e Áudio', icon: Mic }],
+  },
 ];
+
+const TAB_TITLE: Record<SettingsTab, string> = {
+  account: 'Minha Conta',
+  profile: 'Perfil',
+  voice: 'Voz e Áudio',
+};
 
 export const SettingsModal: FC<SettingsModalProps> = ({
   user,
@@ -53,6 +74,11 @@ export const SettingsModal: FC<SettingsModalProps> = ({
     setTab(next);
   };
 
+  const logout = () => {
+    onClose();
+    onLogout();
+  };
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') guardedClose();
@@ -62,43 +88,45 @@ export const SettingsModal: FC<SettingsModalProps> = ({
   });
 
   return (
-    <div className="modal-overlay" onMouseDown={guardedClose}>
-      <div
-        className="settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Configurações de usuário"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <header className="settings-header">
-          <div className="settings-heading">
-            <span className="settings-title">Configurações de usuário</span>
-            <span className="settings-version">
-              DasCord v{APP_VERSION} · servidor {serverVersion ? `v${serverVersion}` : 'desconhecido'}
-            </span>
-          </div>
-          <button className="icon-btn" onClick={guardedClose} title="Fechar (Esc)">
-            <X size={20} />
-          </button>
-        </header>
-
-        <nav className="settings-tabs" role="tablist">
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              className={`settings-tab ${tab === id ? 'active' : ''}`}
-              onClick={() => guardedTabChange(id)}
-            >
-              <Icon size={16} />
-              <span>{label}</span>
-            </button>
+    <div className="settings-screen" role="dialog" aria-modal="true" aria-label="Configurações de usuário">
+      <nav className="settings-nav" role="tablist">
+        <div className="settings-nav-inner">
+          {GROUPS.map((group) => (
+            <div className="settings-nav-group" key={group.title}>
+              <h2 className="settings-nav-title">{group.title}</h2>
+              {group.tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={tab === id}
+                  className={`settings-nav-item ${tab === id ? 'active' : ''}`}
+                  onClick={() => guardedTabChange(id)}
+                >
+                  <Icon size={16} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
           ))}
-        </nav>
 
-        <div className="settings-body">
-          {tab === 'account' && <AccountTab user={user} onLogout={onLogout} onClose={onClose} />}
+          <div className="settings-nav-divider" />
+          <button className="settings-nav-item danger" onClick={logout}>
+            <LogOut size={16} />
+            <span>Sair</span>
+          </button>
+
+          <div className="settings-nav-version">
+            DasCord v{APP_VERSION}
+            <br />
+            Servidor {serverVersion ? `v${serverVersion}` : 'desconhecido'}
+          </div>
+        </div>
+      </nav>
+
+      <div className="settings-content">
+        <div className="settings-content-inner">
+          <h1 className="settings-page-title">{TAB_TITLE[tab]}</h1>
+          {tab === 'account' && <AccountTab user={user} />}
           {tab === 'profile' && (
             <ProfileTab
               user={user}
@@ -108,6 +136,14 @@ export const SettingsModal: FC<SettingsModalProps> = ({
             />
           )}
           {tab === 'voice' && <VoiceTab />}
+        </div>
+
+        {/* O botão de fechar acompanha a rolagem, como no Discord */}
+        <div className="settings-close">
+          <button className="settings-close-btn" onClick={guardedClose} aria-label="Fechar configurações">
+            <X size={18} />
+          </button>
+          <span className="settings-close-hint">ESC</span>
         </div>
       </div>
     </div>

@@ -139,15 +139,13 @@
 
 /* ---------- Menus do painel (base em styles/shared.css) ---------- */
 
-/* Os menus do painel abrem para cima */
+/* Os menus do painel abrem para cima. A barra lateral corta o que passa dela
+   (overflow: hidden), então aqui a largura é a dela, não a fixa do popover. */
 .user-panel .popover-menu {
   bottom: calc(100% + 8px);
-}
-
-.popover-menu.device-menu {
-  left: auto;
+  left: 8px;
   right: 8px;
-  width: 260px;
+  width: auto;
 }
 
 .device-name {

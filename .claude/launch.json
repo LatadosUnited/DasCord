@@ -4,7 +4,11 @@
     {
       "name": "dascord-server",
       "runtimeExecutable": "cargo",
-      "runtimeArgs": ["run", "--manifest-path", "server/Cargo.toml"],
+      "runtimeArgs": [
+        "run",
+        "--manifest-path",
+        "server/Cargo.toml"
+      ],
       "port": 3001
     },
     {
@@ -28,7 +32,19 @@
     {
       "name": "dascord-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 1420
+    },
+    {
+      "name": "dascord-web-local",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_API_URL=http://localhost:3001&& npm run dev"
+      ],
       "port": 1420
     }
   ]

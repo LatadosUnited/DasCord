@@ -1,5 +1,5 @@
 import { FC, FormEvent, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
+import { AlertCircle, CheckCircle2, KeyRound, MonitorSmartphone } from 'lucide-react';
 import { User } from '../../types';
 import {
   AccountInfo,
@@ -11,8 +11,6 @@ import {
 
 interface AccountTabProps {
   user: User;
-  onLogout: () => void;
-  onClose: () => void;
 }
 
 type Feedback = { type: 'success' | 'error'; message: string } | null;
@@ -23,7 +21,7 @@ function maskEmail(email: string): string {
   return `${'•'.repeat(Math.max(name.length, 4))}@${domain}`;
 }
 
-export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => {
+export const AccountTab: FC<AccountTabProps> = ({ user }) => {
   const guest = isGuestUser(user);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -105,11 +103,6 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
     setSessionsFeedback({ type: 'success', message: 'As outras sessões foram encerradas.' });
   };
 
-  const logout = () => {
-    onClose();
-    onLogout();
-  };
-
   if (guest) {
     return (
       <div className="settings-section">
@@ -120,10 +113,6 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
             convidado expira em 24 horas.
           </span>
         </div>
-        <button className="btn danger fit" onClick={logout}>
-          <LogOut size={16} />
-          Sair
-        </button>
       </div>
     );
   }
@@ -268,13 +257,6 @@ export const AccountTab: FC<AccountTabProps> = ({ user, onLogout, onClose }) => 
           {revoking ? 'Encerrando...' : 'Encerrar as outras sessões'}
         </button>
         {sessionsFeedback && <FeedbackBox feedback={sessionsFeedback} />}
-      </section>
-
-      <section className="settings-group">
-        <button className="btn danger fit" onClick={logout}>
-          <LogOut size={16} />
-          Sair da conta
-        </button>
       </section>
     </div>
   );
