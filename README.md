@@ -69,6 +69,94 @@ enviado** — as linhas antigas são convertidas sozinhas na primeira subida.
 Os contadores ficam em memória: reiniciar o servidor zera todos. São proteção contra rajada
 e abuso casual, não cotas de uso.
 
+## Atualizações do app
+
+O servidor distribui as versões novas do app desktop. O app pergunta em
+`GET /api/update/{plataforma}/{arquitetura}/{versão atual}` (formato do updater do Tauri):
+a resposta é `204` quando não há nada mais novo e, quando há, traz a versão, as notas, o
+endereço do instalador e a assinatura. Os instaladores saem de `/updates/`.
+
+O app pergunta ao abrir e a cada 6 horas. Havendo versão nova, aparece um aviso com
+"Atualizar agora": ele baixa, confere a assinatura, instala e reinicia sozinho. No navegador
+o aviso nunca aparece — atualização é coisa do app desktop.
+
+### Assinando o build
+
+Os apps só aceitam instalador assinado com a chave do projeto. A chave pública está em
+`src-tauri/tauri.conf.json`; a privada fica **fora do repositório**, em
+`~/.tauri/dascord.key` (no Windows, `C:\Users\<você>\.tauri\dascord.key`).
+
+> **Guarde a chave privada nos backups.** Sem ela não dá para publicar atualização nenhuma, e
+> os apps já instalados não aceitam instalador assinado por outra chave: só uma reinstalação
+> manual tiraria as pessoas da versão antiga.
+
+```powershell
+# No Windows, em PowerShell. A chave vai pelo conteúdo, não pelo caminho:
+# a CLI ignora TAURI_SIGNING_PRIVATE_KEY_PATH aqui.
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$HOME\.tauri\dascord.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+npm run tauri build
+```
+
+O build gera o instalador e o `.sig` ao lado dele, em `src-tauri/target/release/bundle/`.
+
+> **Confira se o `.sig` saiu.** Sem a chave, o build ainda gera os instaladores, reclama no fim
+> ("no private key") e mesmo assim termina com sucesso. Um instalador publicado sem assinatura
+> não é aceito por ninguém. No fim de um build bom aparece "Finished 2 updater signatures".
+
+O endereço que os apps consultam também fica gravado no build, em `plugins.updater.endpoints`
+do `src-tauri/tauri.conf.json`. Trocar de servidor exige um build novo, e quem já instalou o
+app continua perguntando ao endereço antigo.
+
+### Publicando
+
+Para publicar uma versão, copie para `updates/`, dentro da pasta de dados:
+
+1. o instalador (ex.: `DasCord_0.2.1_x64_en-US.msi`);
+2. o `.sig` que o build gera ao lado dele (`DasCord_0.2.1_x64_en-US.msi.sig`);
+3. o `latest.json`, **por último** — é ele que faz os apps enxergarem a versão:
+
+```json
+{
+  "version": "0.2.1",
+  "notes": "O que mudou nesta versão",
+  "pub_date": "2026-09-17T12:00:00Z",
+  "platforms": {
+    "windows-x86_64": "DasCord_0.2.1_x64_en-US.msi"
+  }
+}
+```
+
+O build gera dois instaladores, `.msi` e `.exe` (NSIS). **Publique o mesmo tipo que as pessoas
+usaram para instalar** — misturar os dois deixa duas entradas na lista de programas, cada uma
+atualizando por conta própria. As instalações de hoje vieram do `.msi`.
+
+O manifesto é lido a cada pergunta, então não precisa reiniciar o servidor. A assinatura
+não vai no manifesto: o servidor lê do `.sig`. Se faltar o instalador ou a assinatura, ou
+se o `latest.json` estiver malformado, o app recebe `503`, e o motivo aparece no log do
+servidor. Plataforma que não está na lista continua na versão que tem.
+
+## Subindo na VPS
+
+`scripts/deploy.sh` atualiza o servidor: `git pull`, compila **na VPS** (o build do Windows não
+roda em Linux) e reinicia o serviço. Compila antes de reiniciar, para uma compilação quebrada
+não derrubar o que está no ar.
+
+```bash
+./scripts/deploy.sh                 # atualiza e reinicia o servidor
+./scripts/deploy.sh --descobrir     # mostra serviço e caminhos na VPS, sem mudar nada
+./scripts/deploy.sh --publicar src-tauri/target/release/bundle/msi/DasCord_0.2.1_x64_en-US.msi
+```
+
+A autenticação é por chave SSH; o script não guarda senha. Para instalar a chave uma vez:
+
+```bash
+ssh-copy-id -i ~/.ssh/dascord_vps.pub root@srv1915663.hstgr.cloud
+```
+
+Máquina, serviço e caminhos saem de `DASCORD_SSH`, `DASCORD_REMOTE_DIR`, `DASCORD_SERVICE` e
+`DASCORD_REMOTE_DATA` — os padrões estão no topo do script.
+
 ## Voz: servidor de mídia (SFU)
 
 A voz funciona de dois jeitos:

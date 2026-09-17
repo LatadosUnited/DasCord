@@ -1,0 +1,2 @@
+# Script roda na VPS (Linux): CRLF quebraria o shebang
+*.sh text eol=lf

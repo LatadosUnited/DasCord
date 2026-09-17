@@ -105,6 +105,8 @@ async fn main() {
     std::fs::create_dir_all(&icons_dir).expect("Falha ao criar a pasta de ícones de servidor");
     let attachments_dir = data_dir.join("attachments");
     std::fs::create_dir_all(&attachments_dir).expect("Falha ao criar a pasta de anexos");
+    let updates_dir = data_dir.join("updates");
+    std::fs::create_dir_all(&updates_dir).expect("Falha ao criar a pasta de atualizações");
     let public_url = std::env::var("DASCORD_PUBLIC_URL")
         .unwrap_or_else(|_| format!("http://localhost:{}", addr.port()))
         .trim_end_matches('/')
@@ -131,6 +133,7 @@ async fn main() {
         avatars_dir: avatars_dir.clone(),
         icons_dir: icons_dir.clone(),
         attachments_dir: attachments_dir.clone(),
+        updates_dir: updates_dir.clone(),
         public_url,
         policy: AccessPolicy::from_env(),
         signer: UrlSigner::load(data_dir),
@@ -154,7 +157,7 @@ async fn main() {
         Err(e) => eprintln!("⚠️ Falha ao limpar anexos órfãos: {}", e),
     }
 
-    let app = routes::router(&avatars_dir, &icons_dir)
+    let app = routes::router(&avatars_dir, &icons_dir, &updates_dir)
         .layer(cors)
         .with_state(state);
 

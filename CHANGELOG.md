@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ## [Não lançado]
 
 ### Adicionado
+- **O app se atualiza sozinho**: ao abrir (e a cada 6 horas), ele pergunta ao servidor se há versão nova. Havendo, um aviso oferece "Atualizar agora", com o progresso do download ali mesmo; ao terminar, o app reinicia já na versão nova. Só instalador assinado com a chave do projeto é aceito.
+- **Servidor distribui as atualizações do app**: `GET /api/update/{plataforma}/{arquitetura}/{versão}` responde no formato do updater do Tauri, e os instaladores saem de `/updates/`. Para publicar uma versão, basta copiar o instalador, o `.sig` e o `latest.json` para a pasta `updates` dos dados, sem reiniciar.
 - **Botão de reagir no fim da fila de reações**: com o mouse na mensagem, um "+" ao lado dos emojis já usados abre o seletor ali mesmo, sem precisar subir até a barra que aparece no topo da mensagem.
 - **Seletor de emoji completo**, o mesmo na caixa de mensagem e na barra de reação: quase 2000 emojis separados por categoria, busca por nome em português e sem acento ("coracao" acha ❤️), tom de pele à escolha e uma faixa de usados recentemente. Dá para navegar pelo teclado, e o emoji entra onde o cursor parou, não no fim do texto. Antes eram seis emojis fixos para reagir, e o botão da caixa de mensagem só colava 💡. Emoji que a fonte do sistema não tem fica de fora da lista, em vez de virar quadradinho.
 - **Imagens no chat**: escolha pelo botão "+" da caixa de mensagem, com pré-visualização antes de enviar, até 8 MB por imagem (PNG, JPG, GIF ou WebP). A imagem só aparece para os outros quando a mensagem é enviada; a escolhida e nunca enviada é descartada.

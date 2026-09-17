@@ -52,6 +52,9 @@ em `.claude/launch.json`.
 
 - **Voz mexe nos dois motores.** Uma mudança de comportamento em `webrtc.ts` (P2P) quase sempre
   precisa do equivalente em `sfuVoice.ts` (LiveKit) — o SFU é o que está em produção.
+- **O build não avisa direito quando não assina.** Sem `TAURI_SIGNING_PRIVATE_KEY` (o conteúdo
+  da chave; a variável `..._PATH` é ignorada), `npm run tauri build` gera os instaladores, imprime
+  "no private key" no fim e ainda assim sai com código 0. Confira se os `.sig` foram gerados.
 - `cargo build` falha com "Acesso negado (os error 5)" enquanto o binário do servidor está rodando:
   pare o preview antes.
 - Na automação do navegador, `key Enter` **não** dispara o `onKeyDown` do React; clique o botão.

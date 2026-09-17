@@ -24,9 +24,21 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https: http://localhost:3001; media-src 'self' blob: mediastream:; connect-src 'self' ipc: http://ipc.localhost http://localhost:3001 ws://localhost:3001 ws://localhost:1420 ws://localhost:1421 http://localhost:7880 ws://localhost:7880 https://dascord.jmrelatorio.tech wss://dascord.jmrelatorio.tech wss://livekit.jmrelatorio.tech https://srv1915663.hstgr.cloud wss://srv1915663.hstgr.cloud"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFMjc0NkY0M0E5QjA5RDQKUldUVUNaczY5RVluemlEVmM1bTZib1ZsT0tYWXJxbjFFQXdNc2htK2RUUlFYc3ptbWR1M3AxaFUK",
+      "endpoints": [
+        "https://srv1915663.hstgr.cloud/api/update/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

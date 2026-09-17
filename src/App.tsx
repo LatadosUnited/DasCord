@@ -16,6 +16,7 @@ import { AddServerModal } from './components/servers/AddServerModal';
 import { InviteModal } from './components/servers/InviteModal';
 import { ServerSettingsModal } from './components/servers/ServerSettingsModal';
 import { VersionBanner } from './components/VersionBanner';
+import { UpdateBanner } from './components/UpdateBanner';
 import { Channel, SettingsTab, User, UserStatus } from './types';
 import { apiUpdatePresence } from './services/users';
 import { apiLeaveServer } from './services/servers';
@@ -29,6 +30,7 @@ import { useTyping } from './hooks/useTyping';
 import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 import { useSystemStats } from './hooks/useSystemStats';
 import { useServerVersion } from './hooks/useServerVersion';
+import { useAppUpdate } from './hooks/useAppUpdate';
 import './App.css';
 
 /**
@@ -73,6 +75,7 @@ export function App() {
 
   const { stats, refresh: refreshStats } = useSystemStats();
   const serverVersion = useServerVersion(serverOnline);
+  const appUpdate = useAppUpdate();
 
   // UI Panels & Modals
   const [showMemberList, setShowMemberList] = useState(true);
@@ -157,6 +160,7 @@ export function App() {
       <>
         <AuthScreen onLogin={session.signIn} />
         <VersionBanner serverVersion={serverVersion} />
+        <UpdateBanner state={appUpdate} />
       </>
     );
   }
@@ -314,6 +318,7 @@ export function App() {
       )}
 
       <VersionBanner serverVersion={serverVersion} />
+      <UpdateBanner state={appUpdate} />
 
       {channelDialog && currentServer && (
         <ChannelDialog

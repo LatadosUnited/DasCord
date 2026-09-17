@@ -71,6 +71,8 @@ pub struct AppState {
     pub avatars_dir: PathBuf,
     pub icons_dir: PathBuf,
     pub attachments_dir: PathBuf,
+    /// Instaladores do app, suas assinaturas e o latest.json que diz qual é a versão nova
+    pub updates_dir: PathBuf,
     /// Endereço público do servidor, usado para montar a URL dos avatares enviados
     pub public_url: String,
     /// Quem pode entrar e como o servidor enxerga o IP de quem chega

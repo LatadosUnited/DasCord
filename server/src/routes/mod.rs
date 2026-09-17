@@ -9,6 +9,7 @@ pub mod friends;
 pub mod messages;
 pub mod meta;
 pub mod servers;
+pub mod updates;
 pub mod users;
 pub mod voice;
 
@@ -25,11 +26,15 @@ use crate::state::AppState;
 use crate::{ws, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES};
 
 /// Monta o roteador. Quem chama ainda aplica o CORS e entrega o estado.
-pub fn router(avatars_dir: &Path, icons_dir: &Path) -> Router<Arc<AppState>> {
+pub fn router(avatars_dir: &Path, icons_dir: &Path, updates_dir: &Path) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(meta::root_handler))
         .route("/health", get(meta::health_handler))
         .route("/api/version", get(meta::version_handler))
+        .route(
+            "/api/update/{target}/{arch}/{current_version}",
+            get(updates::update_handler),
+        )
         .route("/api/snowflake", get(meta::snowflake_handler))
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
@@ -86,6 +91,8 @@ pub fn router(avatars_dir: &Path, icons_dir: &Path) -> Router<Arc<AppState>> {
         // As imagens do chat, não — elas saem por /api/attachments/{id}, com endereço assinado.
         .nest_service("/avatars", ServeDir::new(avatars_dir))
         .nest_service("/icons", ServeDir::new(icons_dir))
+        // Os instaladores são os mesmos para todos, e o app confere a assinatura antes de instalar
+        .nest_service("/updates", ServeDir::new(updates_dir))
         .route("/api/attachments/{attachment_id}", get(messages::attachment_handler))
         .route("/ws", get(ws::ws_handler))
 }
