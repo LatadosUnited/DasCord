@@ -5,6 +5,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.2.2] - 2026-09-17
+
 ### Corrigido
 - **A janela tinha duas barras de título, e só a do Windows funcionava.** As decorações do sistema nunca foram desligadas, então a barra nativa aparecia acima da barra do app — e os botões de minimizar, maximizar e fechar do app eram só desenho, sem ação nenhuma. Agora a janela usa só a barra do DasCord, com os três botões funcionando e a área de arrastar. No navegador eles somem, que é quem manda na janela lá é o próprio navegador.
 
