@@ -20,10 +20,10 @@ set -euo pipefail
 
 SSH_TARGET="${DASCORD_SSH:-root@srv1915663.hstgr.cloud}"
 SSH_KEY="${DASCORD_SSH_KEY:-$HOME/.ssh/dascord_vps}"
-REMOTE_DIR="${DASCORD_REMOTE_DIR:-/opt/dascord}"
-SERVICE="${DASCORD_SERVICE:-dascord-server}"
+REMOTE_DIR="${DASCORD_REMOTE_DIR:-/opt/dascord/app}"
+SERVICE="${DASCORD_SERVICE:-dascord}"
 # A pasta de dados do servidor (banco, uploads e os instaladores em updates/)
-REMOTE_DATA="${DASCORD_REMOTE_DATA:-$REMOTE_DIR/server/data}"
+REMOTE_DATA="${DASCORD_REMOTE_DATA:-/var/lib/dascord}"
 
 ssh_opts=(-o StrictHostKeyChecking=accept-new)
 [ -f "$SSH_KEY" ] && ssh_opts+=(-i "$SSH_KEY")
@@ -65,13 +65,13 @@ publicar() {
   esac
 
   echo "→ Enviando $nome e a assinatura para $REMOTE_DATA/updates"
-  remoto "mkdir -p '$REMOTE_DATA/updates'"
+  remoto "mkdir -p '$REMOTE_DATA/updates' && chown dascord:dascord '$REMOTE_DATA/updates'"
   scp "${ssh_opts[@]}" "$instalador" "$assinatura" "$SSH_TARGET:$REMOTE_DATA/updates/"
 
   local notas
   notas="${DASCORD_UPDATE_NOTES:-Veja o CHANGELOG da versão $versao.}"
   echo "→ Publicando o latest.json (versão $versao)"
-  remoto "cat > '$REMOTE_DATA/updates/latest.json'" <<JSON
+  remoto "cat > '$REMOTE_DATA/updates/latest.json' && chown -R dascord:dascord '$REMOTE_DATA/updates'" <<JSON
 {
   "version": "$versao",
   "notes": "$notas",
@@ -88,9 +88,14 @@ atualizar_servidor() {
   echo "→ Atualizando o código em $REMOTE_DIR"
   remoto "cd '$REMOTE_DIR' && git pull --ff-only"
 
-  # Compilar antes de parar o serviço: se a compilação falhar, o que está no ar continua de pé
+  # Compilar antes de parar o serviço: se a compilação falhar, o que está no ar continua de pé.
+  # O cargo do rustup não está no PATH de uma sessão não-interativa, daí o source.
   echo "→ Compilando o servidor (demora alguns minutos)"
-  remoto "cd '$REMOTE_DIR' && cargo build --release --manifest-path server/Cargo.toml"
+  remoto "cd '$REMOTE_DIR' && . \"\$HOME/.cargo/env\" && cargo build --release --manifest-path server/Cargo.toml"
+
+  # O nginx serve dist/ direto do disco: sem refazer, a versão web fica na do dia anterior
+  echo "→ Recompilando o app web (dist/)"
+  remoto "cd '$REMOTE_DIR' && npm ci --silent && npm run build"
 
   echo "→ Reiniciando $SERVICE (derruba as conexões abertas, inclusive as chamadas de voz)"
   remoto "systemctl restart '$SERVICE' && sleep 2 && systemctl is-active '$SERVICE'"

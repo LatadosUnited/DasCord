@@ -155,7 +155,19 @@ ssh-copy-id -i ~/.ssh/dascord_vps.pub root@srv1915663.hstgr.cloud
 ```
 
 Máquina, serviço e caminhos saem de `DASCORD_SSH`, `DASCORD_REMOTE_DIR`, `DASCORD_SERVICE` e
-`DASCORD_REMOTE_DATA` — os padrões estão no topo do script.
+`DASCORD_REMOTE_DATA` — os padrões são os da VPS de hoje: `/opt/dascord/app`, serviço `dascord`
+e dados em `/var/lib/dascord`.
+
+O nginx da VPS precisa mandar `/updates/` para o servidor Rust. Sem essa regra, o caminho cai
+no `try_files` do app web e o updater baixa o `index.html` no lugar do instalador:
+
+```nginx
+location /updates/ {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
 
 ## Voz: servidor de mídia (SFU)
 
