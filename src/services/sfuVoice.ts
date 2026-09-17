@@ -10,6 +10,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoQuality,
 } from 'livekit-client';
 import { realtimeSocket, SocketEvent } from './socket';
 import {
@@ -17,12 +18,14 @@ import {
   audioInputOptions,
   getVoiceSettings,
   screenQualityPreset,
+  ScreenQualityPreset,
   subscribeVoiceSettings,
 } from './voiceSettings';
 import type { User, VoiceParticipant } from '../types';
 import * as signal from './voiceSignaling';
 import { InputStatusStore } from './microphone';
 import { ParticipantRoster } from './voiceParticipants';
+import { applySenderQuality, applyTrackQuality } from './screenCapture';
 import { ScreenShareState } from './screenShareState';
 import type { ParticipantsListener } from './voiceTypes';
 import type { VoiceCredentials } from './voice';
@@ -55,6 +58,7 @@ class SfuVoiceService {
 
   // Transmissão de tela
   private screen = new ScreenShareState();
+  private appliedScreenQuality = getVoiceSettings().screenQuality;
 
   private input = new InputStatusStore();
 
@@ -200,11 +204,16 @@ class SfuVoiceService {
 
   private handleSettingsChange() {
     if (!this.room) return;
-    const { inputDeviceId, outputDeviceId } = getVoiceSettings();
+    const { inputDeviceId, outputDeviceId, screenQuality } = getVoiceSettings();
     this.room.switchActiveDevice('audioinput', inputDeviceId).catch((err) => {
       console.warn('Não foi possível trocar o microfone:', err);
     });
     this.audioElements.forEach((el) => applyOutputDevice(el as HTMLAudioElement, outputDeviceId));
+
+    if (screenQuality !== this.appliedScreenQuality) {
+      this.appliedScreenQuality = screenQuality;
+      if (this.screen.sharing) this.applyScreenQuality(screenQualityPreset(screenQuality));
+    }
   }
 
   // ---------- Transmissão de tela ----------
@@ -234,6 +243,7 @@ class SfuVoiceService {
     const track = publication?.track;
     if (!track) return null;
     this.screen.setLocal(track.mediaStream ?? new MediaStream([track.mediaStreamTrack]));
+    this.appliedScreenQuality = preset.id;
     // Botão "Parar de compartilhar" do próprio sistema
     track.mediaStreamTrack.addEventListener('ended', () => this.stopScreenShare());
 
@@ -252,6 +262,15 @@ class SfuVoiceService {
     this.sendScreenEvent('screen-stop');
     this.syncParticipants();
     this.screen.notify();
+  }
+
+  /** Muda a qualidade sem reabrir o seletor de tela: a captura e o envio já estão de pé */
+  private applyScreenQuality(preset: ScreenQualityPreset) {
+    const track = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track;
+    if (!track) return;
+
+    applyTrackQuality(track.mediaStreamTrack, preset);
+    if (track.sender) applySenderQuality(track.sender, preset);
   }
 
   /** No SFU, assistir é se inscrever na faixa de vídeo de quem transmite */
@@ -296,13 +315,18 @@ class SfuVoiceService {
             publication.setSubscribed(false);
             return;
           }
+          // O vídeo vai para um <video> nosso, sem track.attach(): sem pedir a camada
+          // de cima o servidor entrega a menor do simulcast, um quarto da resolução.
+          publication.setVideoQuality(VideoQuality.HIGH);
           this.screen.setRemote(participant.identity, track.mediaStream ?? new MediaStream([track.mediaStreamTrack]));
           this.screen.notify();
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         track.detach().forEach((el) => el.remove());
-        this.audioElements.delete(participant.identity);
+        // Só o áudio tem elemento guardado; largar a tela não pode fazer o mapa
+        // esquecer o <audio> da pessoa, que é por onde passa o ensurdecer
+        if (track.kind === Track.Kind.Audio) this.audioElements.delete(participant.identity);
         if (this.screen.dropRemote(participant.identity)) this.screen.notify();
       })
       .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
@@ -324,7 +348,14 @@ class SfuVoiceService {
       })
       .on(RoomEvent.TrackMuted, () => this.syncParticipants())
       .on(RoomEvent.TrackUnmuted, () => this.syncParticipants())
-      .on(RoomEvent.TrackUnpublished, () => this.syncParticipants())
+      .on(RoomEvent.TrackUnpublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        // Parou de transmitir: fecha o ladrilho em vez de deixá-lo esperando vídeo
+        if (publication.source === Track.Source.ScreenShare) {
+          this.screen.forget(participant.identity);
+          this.screen.notify();
+        }
+        this.syncParticipants();
+      })
       .on(RoomEvent.LocalTrackPublished, () => this.syncParticipants())
       .on(RoomEvent.LocalTrackUnpublished, () => this.syncParticipants())
       .on(RoomEvent.ParticipantMetadataChanged, () => this.syncParticipants())

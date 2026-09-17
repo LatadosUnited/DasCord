@@ -37,6 +37,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Mudo e ensurdecido agora chegam aos outros participantes; antes o ícone do microfone ficava desatualizado.
 
 ### Corrigido
+- **Tela transmitida chegava borrada em quem assiste.** O servidor de mídia manda a tela em camadas e o app nunca pedia a maior, então quem assistia recebia um quarto da resolução escolhida — 640x360 no lugar de 1280x720, medido com dois clientes. Agora o app pede a camada de cima ao começar a assistir.
+- **Ensurdecer parava de silenciar quem tivesse compartilhado a tela.** Bastava alguém transmitir para o app perder de vista o áudio dessa pessoa: o botão de ensurdecer e a troca de dispositivo de saída deixavam de alcançá-la, e o áudio dela ficava tocando solto depois de sair do canal.
+- **Transmissão encerrada deixava um quadro preso em "Conectando à transmissão..."** para quem assistia, até fechar na mão. Agora o quadro fecha sozinho quando a pessoa para de transmitir, como já acontecia na malha P2P.
+- **Trocar a qualidade no meio da transmissão não fazia nada** no servidor de mídia (só funcionava na malha P2P). Ao mudar para um preset menor, o limite das camadas maiores também descia — antes o limite novo ia parar na camada menor, invertido.
 - Conexão de voz que caía (troca de rede, VPN) deixava a pessoa muda para sempre: agora o app reinicia o ICE e mostra "Reconectando".
 - Microfone desconectado no meio da chamada troca para o padrão do sistema; sem nenhum microfone, o app avisa em vez de fingir que a pessoa está falando.
 - **Trocar o endereço do servidor quebrava avatares e ícones já enviados.** O endereço completo ia gravado em cada linha do banco, então mudar de domínio deixava as imagens apontando para o lugar antigo. Agora o banco guarda só o nome do arquivo e a URL é montada na leitura (esquema v7), como já era feito com as imagens do chat. Os avatares e ícones que já existem são convertidos sozinhos na primeira subida.
