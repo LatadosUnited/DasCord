@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, FC } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Hash,
   AtSign,
@@ -10,6 +11,7 @@ import {
   Search,
   PlusCircle,
   Smile,
+  SmilePlus,
   Send,
   Reply,
   Pencil,
@@ -18,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Channel, Message, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EmojiPicker } from './EmojiPicker';
 import {
   ATTACHMENT_TYPES,
   apiUploadAttachment,
@@ -25,8 +28,8 @@ import {
 } from '../services/attachments';
 import './ChatArea.css';
 
-/** Reações rápidas da barra de ações */
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀'];
+/** Tamanho do painel de emoji; serve para decidir se ele cabe abaixo do botão */
+const PAINEL_EMOJI = { largura: 356, altura: 426 };
 
 /** Imagem escolhida na caixa de mensagem, antes de virar mensagem */
 interface PendingAttachment {
@@ -77,6 +80,9 @@ export const ChatArea: FC<ChatAreaProps> = ({
   const [replyTo, setReplyTo] = useState<{ id: string; authorName: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [emojiNoCampo, setEmojiNoCampo] = useState(false);
+  /** Onde desenhar a barra de reação; ela vive fora da rolagem, num portal */
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -93,6 +99,7 @@ export const ChatArea: FC<ChatAreaProps> = ({
     setReplyTo(null);
     setEditing(null);
     setPickerFor(null);
+    setEmojiNoCampo(false);
     setDeletingId(null);
     setAttachmentError(null);
     setAttachments((prev) => {
@@ -104,6 +111,43 @@ export const ChatArea: FC<ChatAreaProps> = ({
   const uploadedIds = attachments.filter((a) => a.id).map((a) => a.id!);
   const uploading = attachments.some((a) => !a.id && !a.failed);
   const canSend = (inputText.trim().length > 0 || uploadedIds.length > 0) && !uploading;
+
+  /**
+   * A barra de reação é grande e ficaria cortada pela rolagem das mensagens, então vai
+   * num portal com posição fixa: abaixo do botão, ou acima dele quando não couber.
+   */
+  const abrirReacao = (messageId: string, botao: HTMLElement) => {
+    if (pickerFor === messageId) {
+      setPickerFor(null);
+      return;
+    }
+    const r = botao.getBoundingClientRect();
+    const abaixo = r.bottom + 8;
+    const top =
+      abaixo + PAINEL_EMOJI.altura > window.innerHeight - 8
+        ? Math.max(8, r.top - 8 - PAINEL_EMOJI.altura)
+        : abaixo;
+    const left = Math.min(
+      Math.max(8, r.right - PAINEL_EMOJI.largura),
+      window.innerWidth - PAINEL_EMOJI.largura - 8,
+    );
+    setEmojiNoCampo(false);
+    setPickerPos({ top, left });
+    setPickerFor(messageId);
+  };
+
+  /**
+   * Emoji entra onde o cursor parou, não no fim do texto. O foco fica no seletor,
+   * que continua aberto para emendar outro emoji; só a posição do cursor é acertada.
+   */
+  const inserirEmoji = (emoji: string) => {
+    const campo = inputRef.current;
+    const inicio = campo?.selectionStart ?? inputText.length;
+    const fim = campo?.selectionEnd ?? inicio;
+    setInputText(inputText.slice(0, inicio) + emoji + inputText.slice(fim));
+    const cursor = inicio + emoji.length;
+    requestAnimationFrame(() => campo?.setSelectionRange(cursor, cursor));
+  };
 
   /** Tira a imagem da tira e devolve a memória da miniatura */
   const dropAttachments = (keep: (a: PendingAttachment) => boolean) => {
@@ -254,7 +298,7 @@ export const ChatArea: FC<ChatAreaProps> = ({
         </div>
       </div>
 
-      <div className="chat-messages">
+      <div className="chat-messages" onScroll={() => pickerFor && setPickerFor(null)}>
         {dmUser ? (
           <div className="channel-welcome-banner dm-welcome-banner">
             <div className="dm-welcome-avatar-wrapper">
@@ -371,6 +415,17 @@ export const ChatArea: FC<ChatAreaProps> = ({
                         <span>{reaction.userIds.length}</span>
                       </button>
                     ))}
+                    {/* Reagir de novo sem subir até a barra que aparece no topo da mensagem */}
+                    {isSaved && (
+                      <button
+                        className="reaction-add"
+                        title="Adicionar reação"
+                        data-emoji-toggle
+                        onClick={(e) => abrirReacao(msg.id, e.currentTarget)}
+                      >
+                        <SmilePlus size={15} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -380,7 +435,9 @@ export const ChatArea: FC<ChatAreaProps> = ({
                   <button
                     className="message-action-btn"
                     title="Reagir"
-                    onClick={() => setPickerFor((prev) => (prev === msg.id ? null : msg.id))}
+                    // O seletor ignora o clique daqui para não fechar e reabrir na mesma ação
+                    data-emoji-toggle
+                    onClick={(e) => abrirReacao(msg.id, e.currentTarget)}
                   >
                     <Smile size={16} />
                   </button>
@@ -408,21 +465,6 @@ export const ChatArea: FC<ChatAreaProps> = ({
                 </div>
               )}
 
-              {pickerFor === msg.id && (
-                <div className="emoji-picker">
-                  {QUICK_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => {
-                        onToggleReaction(msg.id, emoji);
-                        setPickerFor(null);
-                      }}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}
@@ -466,6 +508,11 @@ export const ChatArea: FC<ChatAreaProps> = ({
           </div>
         )}
         {attachmentError && <div className="attachment-error">{attachmentError}</div>}
+        {emojiNoCampo && (
+          <div className="composer-picker-anchor">
+            <EmojiPicker onPick={inserirEmoji} onClose={() => setEmojiNoCampo(false)} />
+          </div>
+        )}
         <div className="chat-input-bar">
           <button
             className="chat-input-btn"
@@ -503,9 +550,14 @@ export const ChatArea: FC<ChatAreaProps> = ({
           />
 
           <button
-            className="chat-input-btn"
+            className={`chat-input-btn ${emojiNoCampo ? 'ativo' : ''}`}
             title="Adicionar emoji"
-            onClick={() => setInputText((prev) => prev + ' 💡')}
+            // O seletor ignora o clique daqui para não fechar e reabrir na mesma ação
+            data-emoji-toggle
+            onClick={() => {
+              setPickerFor(null);
+              setEmojiNoCampo((v) => !v);
+            }}
           >
             <Smile size={22} />
           </button>
@@ -531,6 +583,19 @@ export const ChatArea: FC<ChatAreaProps> = ({
           onClose={() => setDeletingId(null)}
         />
       )}
+
+      {pickerFor &&
+        pickerPos &&
+        createPortal(
+          <div className="reaction-picker-anchor" style={pickerPos}>
+            <EmojiPicker
+              fecharAoEscolher
+              onPick={(emoji) => onToggleReaction(pickerFor, emoji)}
+              onClose={() => setPickerFor(null)}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

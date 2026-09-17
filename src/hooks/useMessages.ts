@@ -19,6 +19,15 @@ interface Options {
   serverOnline: boolean;
 }
 
+/**
+ * Quanto esperamos a confirmação de uma reação antes de desfazê-la. O servidor recusa
+ * em silêncio (mensagem apagada, ou passou dos 20 emojis distintos), então o sumiço do
+ * evento é a única pista de que o clique não valeu.
+ */
+const ESPERA_CONFIRMACAO = 5000;
+
+const chaveReacao = (messageId: string, emoji: string) => `${messageId}|${emoji}`;
+
 /** Histórico por canal, envio otimista e as mudanças que chegam pelo socket */
 export function useMessages({ channelId, currentUser, isAuthenticated, serverOnline }: Options) {
   const [byChannel, setByChannel] = useState<Record<string, Message[]>>({});
@@ -27,6 +36,16 @@ export function useMessages({ channelId, currentUser, isAuthenticated, serverOnl
   useEffect(() => {
     byChannelRef.current = byChannel;
   }, [byChannel]);
+
+  // Reações pedidas e ainda sem resposta do servidor, para poder desfazê-las
+  const reacoesPendentes = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pendentes = reacoesPendentes.current;
+    return () => {
+      pendentes.forEach(clearTimeout);
+      pendentes.clear();
+    };
+  }, []);
 
   // Carrega o histórico salvo ao abrir um canal, e de novo ao reconectar (pega o que chegou offline)
   useEffect(() => {
@@ -105,12 +124,42 @@ export function useMessages({ channelId, currentUser, isAuthenticated, serverOnl
     [channelId, currentUser]
   );
 
-  // Reagir, editar e apagar passam pelo servidor: todo mundo vê o mesmo resultado
+  // Editar e apagar passam pelo servidor: todo mundo vê o mesmo resultado
   const toggleReaction = useCallback(
     (messageId: string, emoji: string) => {
-      realtimeSocket.send({ type: 'reaction', channelId, data: { messageId, emoji } });
+      const alvo = channelId;
+      const mensagem = (byChannelRef.current[alvo] || []).find((m) => m.id === messageId);
+      if (!mensagem) return;
+
+      if (!realtimeSocket.send({ type: 'reaction', channelId: alvo, data: { messageId, emoji } })) {
+        return; // sem conexão não adianta fingir que a reação foi
+      }
+
+      const antes = mensagem.reactions.find((r) => r.emoji === emoji)?.userIds ?? [];
+      const depois = antes.includes(currentUser.id)
+        ? antes.filter((id) => id !== currentUser.id)
+        : [...antes, currentUser.id];
+
+      // O chip responde já; o evento do servidor chega depois com a lista oficial e manda nela
+      setByChannel((prev) => ({
+        ...prev,
+        [alvo]: applyReaction(prev[alvo] || [], messageId, emoji, depois),
+      }));
+
+      const chave = chaveReacao(messageId, emoji);
+      clearTimeout(reacoesPendentes.current.get(chave));
+      reacoesPendentes.current.set(
+        chave,
+        setTimeout(() => {
+          reacoesPendentes.current.delete(chave);
+          setByChannel((prev) => ({
+            ...prev,
+            [alvo]: applyReaction(prev[alvo] || [], messageId, emoji, antes),
+          }));
+        }, ESPERA_CONFIRMACAO)
+      );
     },
-    [channelId]
+    [channelId, currentUser.id]
   );
 
   const edit = useCallback(
@@ -152,6 +201,11 @@ export function useMessages({ channelId, currentUser, isAuthenticated, serverOnl
 
   const applyReactionEvent = useCallback(
     (incomingChannelId: string, messageId: string, emoji: string, userIds: string[]) => {
+      // Chegou a palavra final do servidor: a reação otimista não precisa mais ser desfeita
+      const chave = chaveReacao(messageId, emoji);
+      clearTimeout(reacoesPendentes.current.get(chave));
+      reacoesPendentes.current.delete(chave);
+
       setByChannel((prev) => ({
         ...prev,
         [incomingChannelId]: applyReaction(prev[incomingChannelId] || [], messageId, emoji, userIds),
