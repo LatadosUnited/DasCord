@@ -29,7 +29,7 @@ import { ParticipantRoster } from './voiceParticipants';
 import { applySenderQuality, applyTrackQuality } from './screenCapture';
 import { ScreenShareState } from './screenShareState';
 import type { EntradaListener, ParticipantsListener } from './voiceTypes';
-import { TOPICO_CONTROLE, TOPICO_ENTRADA } from './entradaProtocolo';
+import { TOPICO_CONTROLE, TOPICO_DIRETO, TOPICO_ENTRADA } from './entradaProtocolo';
 import type { VoiceCredentials } from './voice';
 
 /** Avatar vai no metadata do token, gerado pelo servidor Rust */
@@ -305,6 +305,15 @@ class SfuVoiceService {
     this.screen.notify();
   }
 
+  /**
+   * Para de receber a tela pelo SFU sem deixar de assistir: a conexão direta está
+   * trazendo a mesma imagem mais cedo. Voltar a receber é só despausar.
+   */
+  pausarTela(peerId: string, pausada: boolean) {
+    if (!this.screen.isWatching(peerId)) return;
+    this.screenPublication(peerId)?.setSubscribed(!pausada);
+  }
+
   getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
     return this.screenPublication(peerId)?.track?.receiver;
   }
@@ -412,7 +421,7 @@ class SfuVoiceService {
         (payload: Uint8Array, participant?: RemoteParticipant, _kind?: DataPacket_Kind, topic?: string) => {
           // Sem remetente conhecido não há como conferir permissão nenhuma: descarta
           if (!participant) return;
-          if (topic !== TOPICO_ENTRADA && topic !== TOPICO_CONTROLE) return;
+          if (topic !== TOPICO_ENTRADA && topic !== TOPICO_CONTROLE && topic !== TOPICO_DIRETO) return;
           this.entradaListeners.forEach((cb) => cb(participant.identity, payload, topic));
         }
       );

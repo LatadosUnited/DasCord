@@ -323,6 +323,22 @@
   color: var(--text-muted);
 }
 
+.latencia-caminho {
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background-color: var(--input-bg);
+  color: var(--text-muted);
+}
+
+.latencia-caminho.direto {
+  background-color: var(--success-soft);
+  color: var(--success-text);
+}
+
 .latencia-painel {
   margin-top: 6px;
   width: 280px;

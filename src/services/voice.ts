@@ -93,6 +93,10 @@ class VoiceService {
     this.engine?.enviarEntrada(destino, dados, confiavel, topico);
   }
 
+  pausarTela(peerId: string, pausada: boolean) {
+    this.engine?.pausarTela(peerId, pausada);
+  }
+
   getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
     return this.engine?.getScreenReceiver(peerId);
   }

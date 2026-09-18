@@ -12,6 +12,7 @@ import {
   PacoteEntrada,
   TIPO,
   TOPICO_CONTROLE,
+  TOPICO_DIRETO,
   TOPICO_ENTRADA,
   codificar,
   codificarControle,
@@ -23,6 +24,7 @@ import { CONTROLE_NEUTRO, conectarControle, desconectarControle, atualizarContro
 import { botaoMouse, listarMonitores, moverMouse, rodaMouse, tecla } from './entradaRemota';
 import { RUNS_IN_TAURI } from './appWindow';
 import { registrarPong, responderPing } from './latencia';
+import { conexaoDireta } from './conexaoDireta';
 
 /**
  * Corta tudo, dos dois lados. É atalho global do sistema porque quem precisa dele está
@@ -84,6 +86,16 @@ class ControleRemotoService {
     this.desinscrever = voice.subscribeEntrada((de, dados, topico) => {
       if (topico === TOPICO_CONTROLE) this.receberCombinado(de, dados);
       else if (topico === TOPICO_ENTRADA) this.receberEntrada(de, dados);
+      else if (topico === TOPICO_DIRETO) conexaoDireta.receberSinal(de, dados);
+    });
+    conexaoDireta.configurar({
+      // Oferta de conexão direta só vale de quem acabou de nos dar controle
+      aceitarOferta: (de) => this.controlando === de,
+      // Pela conexão direta chega o mesmo que pelo SFU, e passa pelo mesmo porteiro
+      aoReceber: (de, dados) => {
+        if (typeof dados === 'string') this.receberCombinado(de, new TextEncoder().encode(dados));
+        else this.receberEntrada(de, dados);
+      },
     });
     // Parar de transmitir é parar de ser controlado: ninguém mexe às cegas nesta máquina
     this.desinscreverTela = voice.subscribeScreenShare(() => {
@@ -108,6 +120,7 @@ class ControleRemotoService {
     this.removerAtalho();
     this.encerrar();
     this.cortarTudo();
+    conexaoDireta.fecharTodas();
     this.pedidos.clear();
     this.controlando = null;
     this.aguardando = null;
@@ -128,6 +141,7 @@ class ControleRemotoService {
       if (!aqui.has(quem)) this.revogar(quem);
     });
     if (this.controlando && !aqui.has(this.controlando)) {
+      conexaoDireta.fechar(this.controlando);
       this.controlando = null;
       mudou = true;
     }
@@ -178,6 +192,9 @@ class ControleRemotoService {
     // Cada pessoa com controle ganha o próprio Xbox virtual nesta máquina
     conectarControle(quem).catch((e: Error) => console.warn('Sem controle virtual para', quem, e.message));
     this.enviarCombinado(quem, { tipo: 'aceito' });
+    // O "aceito" vai antes: quem pediu só aceita a oferta direta depois de saber que tem controle
+    const tela = voice.getScreenShareSnapshot().local?.getVideoTracks()[0];
+    if (tela) conexaoDireta.abrir(quem, tela);
     this.notificar();
   }
 
@@ -193,6 +210,7 @@ class ControleRemotoService {
     this.soltarTudo(quem);
     desconectarControle(quem).catch(() => {});
     this.enviarCombinado(quem, { tipo: 'encerrado' });
+    conexaoDireta.fechar(quem);
     this.notificar();
   }
 
@@ -271,13 +289,18 @@ class ControleRemotoService {
   encerrar() {
     if (!this.controlando) return;
     this.enviarCombinado(this.controlando, { tipo: 'encerrado' });
+    conexaoDireta.fechar(this.controlando);
     this.controlando = null;
     this.notificar();
   }
 
+  /** Pelo caminho direto quando ele está de pé; senão, pelo SFU */
   enviar(pacote: PacoteEntrada) {
     if (!this.controlando) return;
-    voice.enviarEntrada(this.controlando, codificar(pacote), ehConfiavel(pacote));
+    const dados = codificar(pacote);
+    const confiavel = ehConfiavel(pacote);
+    if (conexaoDireta.enviar(this.controlando, dados, confiavel)) return;
+    voice.enviarEntrada(this.controlando, dados, confiavel);
   }
 
   // ---------- O combinado ----------
@@ -318,6 +341,7 @@ class ControleRemotoService {
           this.soltarTudo(de);
           desconectarControle(de).catch(() => {});
         }
+        conexaoDireta.fechar(de);
         break;
     }
     this.notificar();

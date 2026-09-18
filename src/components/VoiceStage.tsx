@@ -8,6 +8,7 @@ import { useCapturaControle } from '../hooks/useCapturaControle';
 import { useMonitores } from '../hooks/useMonitores';
 import { useLatencia } from '../hooks/useLatencia';
 import { Latencia } from '../services/latencia';
+import { useConexaoDireta } from '../services/conexaoDireta';
 import './VoiceStage.css';
 
 const CONNECTION_LABELS: Record<Exclude<PeerConnectionStatus, 'connected'>, string> = {
@@ -120,9 +121,10 @@ export const VoiceStage: FC<VoiceStageProps> = ({
             />
           )}
           {screen.watching.map((id) => (
-            <ScreenTile
+            <TelaRemota
               key={id}
-              stream={screen.remote[id] ?? null}
+              id={id}
+              streamServidor={screen.remote[id] ?? null}
               label={nameOf(id)}
               onClose={() => {
                 if (controle.controlando === id) controleRemoto.encerrar();
@@ -130,8 +132,8 @@ export const VoiceStage: FC<VoiceStageProps> = ({
               }}
               controlando={controle.controlando === id}
               medirDe={id}
-              rodape={
-                podeControlar && screen.remote[id] ? (
+              rodape={(temVideo) =>
+                podeControlar && temVideo ? (
                   <ControleBotao
                     estado={
                       controle.controlando === id
@@ -279,6 +281,22 @@ export const VoiceStage: FC<VoiceStageProps> = ({
   );
 };
 
+interface TelaRemotaProps extends Omit<ScreenTileProps, 'stream' | 'rodape'> {
+  id: string;
+  streamServidor: MediaStream | null;
+  rodape: (temVideo: boolean) => ReactNode;
+}
+
+/**
+ * A tela de alguém: pela conexão direta quando ela está de pé (é a mesma imagem, mais
+ * cedo), senão pelo servidor. Quem assiste não precisa saber a diferença, mas o selo diz.
+ */
+const TelaRemota: FC<TelaRemotaProps> = ({ id, streamServidor, rodape, ...resto }) => {
+  const direta = useConexaoDireta(id);
+  const stream = direta.caminho === 'direto' && direta.video ? direta.video : streamServidor;
+  return <ScreenTile {...resto} stream={stream} rodape={rodape(stream !== null)} />;
+};
+
 interface ScreenTileProps {
   stream: MediaStream | null;
   label: string;
@@ -354,6 +372,7 @@ const SeloLatencia: FC<{ latencia: Latencia }> = ({ latencia: l }) => {
       >
         {l.total !== null ? `~${Math.round(l.total)} ms` : l.semResposta ? 'Sem ping' : 'Medindo...'}
         {l.fps !== null && <span className="latencia-fps">{Math.round(l.fps)} fps</span>}
+        <span className={`latencia-caminho ${l.caminho}`}>{l.caminho === 'direto' ? 'direto' : 'servidor'}</span>
       </button>
 
       {aberto && (
@@ -387,6 +406,11 @@ const SeloLatencia: FC<{ latencia: Latencia }> = ({ latencia: l }) => {
           <div className="latencia-linha">
             <span>Decodificar aqui</span>
             <span>{ms(l.decodificacao)}</span>
+          </div>
+
+          <div className="latencia-linha">
+            <span>Caminho</span>
+            <span>{l.caminho === 'direto' ? 'Direto entre as duas casas' : 'Pelo servidor'}</span>
           </div>
 
           <div className="latencia-titulo">Vídeo</div>

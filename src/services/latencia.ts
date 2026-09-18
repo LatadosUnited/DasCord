@@ -6,6 +6,7 @@
 // o tempo de ida sozinho — é estimado como metade da ida e volta, e a tela diz isso.
 import { voice } from './voice';
 import { TOPICO_CONTROLE, codificarControle } from './entradaProtocolo';
+import { conexaoDireta } from './conexaoDireta';
 
 export interface Latencia {
   /** Ida e volta até quem transmite, pelo mesmo servidor que leva a imagem (mediana) */
@@ -30,6 +31,8 @@ export interface Latencia {
   total: number | null;
   /** Vários pings sem resposta: quem transmite está numa versão que não responde */
   semResposta: boolean;
+  /** Direto entre as duas casas, ou passando pelo servidor de mídia */
+  caminho: 'direto' | 'servidor';
 }
 
 const VAZIA: Latencia = {
@@ -46,6 +49,7 @@ const VAZIA: Latencia = {
   imagem: null,
   total: null,
   semResposta: false,
+  caminho: 'servidor',
 };
 
 const INTERVALO_MS = 1000;
@@ -89,6 +93,7 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
   let codificacao: number | null = null;
   let anterior: Estat | null = null;
   let pingsEnviados = 0;
+  let receptorAnterior: RTCRtpReceiver | null = null;
 
   const aoPong: Ouvinte = (t, codificacaoRemota) => {
     idasEVoltas.push(performance.now() - t);
@@ -101,11 +106,22 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
 
   const medir = async () => {
     // Pelo caminho que pode perder pacote: retransmitir um ping perdido inflaria a medida
-    voice.enviarEntrada(peerId, codificarControle({ tipo: 'ping', t: performance.now() }), false, TOPICO_CONTROLE);
+    const ping = codificarControle({ tipo: 'ping', t: performance.now() });
+    if (!conexaoDireta.enviarTexto(peerId, new TextDecoder().decode(ping))) {
+      voice.enviarEntrada(peerId, ping, false, TOPICO_CONTROLE);
+    }
     pingsEnviados++;
 
-    const receptor = voice.getScreenReceiver(peerId);
+    const direto = conexaoDireta.receptor(peerId);
+    const receptor = direto ?? voice.getScreenReceiver(peerId);
     if (!receptor) return;
+    // Trocou de caminho: os contadores do receptor novo começam do zero, e a diferença
+    // com os do antigo daria número sem sentido. As idas e voltas antigas também não valem.
+    if (receptor !== receptorAnterior) {
+      receptorAnterior = receptor;
+      anterior = null;
+      idasEVoltas.length = 0;
+    }
     const relatorio = await receptor.getStats();
 
     const porId = new Map<string, Estat>();
@@ -153,6 +169,7 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
       imagem,
       total: entrada === null || imagem === null ? null : entrada + imagem + quadro,
       semResposta: pingsEnviados >= 3 && idasEVoltas.length === 0,
+      caminho: direto ? 'direto' : 'servidor',
     });
   };
 
@@ -170,14 +187,14 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
 
 // ---------- Lado de quem transmite ----------
 
-let codificacaoAnterior: Estat | null = null;
+/** Um por emissor: SFU e conexão direta codificam cada um a sua cópia */
+const codificacaoAnterior = new WeakMap<RTCRtpSender, Estat>();
 
 /**
  * Tempo médio para codificar um quadro da nossa tela desde a última pergunta. Com
  * várias camadas, vale a maior — é ela que quem joga costuma receber.
  */
-async function codificacaoLocal(): Promise<number | null> {
-  const emissor = voice.getScreenSender();
+async function codificacaoLocal(emissor: RTCRtpSender | undefined): Promise<number | null> {
   if (!emissor) return null;
   const relatorio = await emissor.getStats();
   let atual: Estat | null = null;
@@ -186,8 +203,8 @@ async function codificacaoLocal(): Promise<number | null> {
     if (!atual || (num(s, 'frameHeight') ?? 0) > (num(atual, 'frameHeight') ?? 0)) atual = s;
   });
   if (!atual) return null;
-  const tempo = porUnidade(atual, codificacaoAnterior, 'totalEncodeTime', 'framesEncoded');
-  codificacaoAnterior = atual;
+  const tempo = porUnidade(atual, codificacaoAnterior.get(emissor) ?? null, 'totalEncodeTime', 'framesEncoded');
+  codificacaoAnterior.set(emissor, atual);
   return tempo;
 }
 
@@ -198,13 +215,11 @@ let ultimaCodificacao: number | null = null;
  * aqui somaria alguns milissegundos à ida e volta de quem perguntou.
  */
 export function responderPing(de: string, t: number) {
-  voice.enviarEntrada(
-    de,
-    codificarControle({ tipo: 'pong', t, codificacao: ultimaCodificacao }),
-    false,
-    TOPICO_CONTROLE
-  );
-  codificacaoLocal()
+  const pong = codificarControle({ tipo: 'pong', t, codificacao: ultimaCodificacao });
+  if (!conexaoDireta.enviarTexto(de, new TextDecoder().decode(pong))) {
+    voice.enviarEntrada(de, pong, false, TOPICO_CONTROLE);
+  }
+  codificacaoLocal(conexaoDireta.emissor(de) ?? voice.getScreenSender())
     .then((codificacao) => {
       ultimaCodificacao = codificacao;
     })

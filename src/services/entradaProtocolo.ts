@@ -10,6 +10,9 @@ export const TOPICO_ENTRADA = 'entrada';
 /** Pedir, aceitar, negar e encerrar — o combinado, que é raro e vai em JSON mesmo */
 export const TOPICO_CONTROLE = 'controle';
 
+/** Oferta, resposta e candidatos da conexão direta (veja conexaoDireta.ts) */
+export const TOPICO_DIRETO = 'direto';
+
 export type MensagemControle =
   | { tipo: 'pedido' }
   | { tipo: 'aceito' }

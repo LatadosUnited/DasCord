@@ -214,6 +214,9 @@ class WebRTCVoiceService {
 
   getInputStatus = this.input.get;
 
+  // Na malha P2P a tela já vem direto de quem transmite; não há o que pausar
+  pausarTela(_peerId: string, _pausada: boolean) {}
+
   getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
     return this.peers
       .get(peerId)
