@@ -55,9 +55,13 @@ em `.claude/launch.json`.
 - **Build sem `VITE_API_URL` aponta para `localhost:3001`.** Vale para o instalador e para o
   `dist/` da VPS: o endereço entra no bundle na hora do build, e o padrão silencioso faz o app
   tentar falar com a máquina de quem abriu. O `deploy.sh` lê o `DASCORD_PUBLIC_URL` do serviço.
-- **O build não avisa direito quando não assina.** Sem `TAURI_SIGNING_PRIVATE_KEY` (o conteúdo
-  da chave; a variável `..._PATH` é ignorada), `npm run tauri build` gera os instaladores, imprime
-  "no private key" no fim e ainda assim sai com código 0. Confira se os `.sig` foram gerados.
+- **Assinar é o passo mais fácil de errar.** A chave vai por `TAURI_SIGNING_PRIVATE_KEY` (o
+  conteúdo, não o caminho: a variável `..._PATH` é ignorada). Sem ela, o build gera os
+  instaladores e só depois falha com "no private key" (código 1) — os arquivos existem, mas sem
+  `.sig`. E **não tente passar a senha vazia pelo ambiente**: no Windows `$env:VAR = ""` apaga a
+  variável, a CLI cai num prompt e o build trava para sempre depois de já ter gerado tudo. O
+  caminho que funciona é compilar sem a chave e assinar depois:
+  `npx tauri signer sign -f "$HOME\.tauri\dascord.key" -p "" <arquivo>`.
 - `cargo build` falha com "Acesso negado (os error 5)" enquanto o binário do servidor está rodando:
   pare o preview antes.
 - Na automação do navegador, `key Enter` **não** dispara o `onKeyDown` do React; clique o botão.

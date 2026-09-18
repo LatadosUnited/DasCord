@@ -138,8 +138,8 @@ npm run tauri build
 
 O build gera o instalador e o `.sig` ao lado dele, em `src-tauri/target/release/bundle/`.
 
-> **Confira se o `.sig` saiu.** Sem a chave, o build ainda gera os instaladores, reclama no fim
-> ("no private key") e mesmo assim termina com sucesso. Um instalador publicado sem assinatura
+> **Confira se o `.sig` saiu.** Sem a chave, o build gera os instaladores e só então falha com
+> "no private key": os arquivos ficam lá, sem assinatura. Um instalador publicado sem assinatura
 > não é aceito por ninguém. No fim de um build bom aparece "Finished 2 updater signatures".
 
 O endereço que os apps consultam também fica gravado no build, em `plugins.updater.endpoints`
