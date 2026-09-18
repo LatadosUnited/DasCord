@@ -15,7 +15,7 @@ import { ScreenShareState } from './screenShareState';
 import { applySenderQuality, applyTrackQuality, captureScreen } from './screenCapture';
 import { IceRecovery } from './iceRestart';
 import { SpeakingDetector, startSpeakingDetector } from './vad';
-import { InputStatus, ParticipantsListener } from './voiceTypes';
+import { EntradaListener, InputStatus, ParticipantsListener } from './voiceTypes';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: ICE_SERVERS,
@@ -213,6 +213,18 @@ class WebRTCVoiceService {
   subscribeInputStatus = this.input.subscribe;
 
   getInputStatus = this.input.get;
+
+  // ---------- Entrada do controle remoto ----------
+  //
+  // A malha P2P não carrega entrada: controlar a máquina de alguém exige o SFU, que é
+  // o que está em produção. Aqui os dois existem só para cumprir o contrato da voz —
+  // num canal em P2P, o app simplesmente não oferece controle remoto.
+
+  enviarEntrada(_destino: string, _dados: Uint8Array<ArrayBuffer>, _confiavel: boolean, _topico?: string) {}
+
+  subscribeEntrada(_cb: EntradaListener): () => void {
+    return () => {};
+  }
 
   private stopSpeaking() {
     if (!this.vad?.speaking) return;

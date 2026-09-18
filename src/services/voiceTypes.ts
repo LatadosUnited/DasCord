@@ -17,6 +17,9 @@ export interface VoiceCredentials {
 
 export type ParticipantsListener = (participants: VoiceParticipant[]) => void;
 
+/** Pacote de entrada cru, com a identidade de quem mandou — ainda sem nenhuma permissão conferida */
+export type EntradaListener = (de: string, dados: Uint8Array, topico: string) => void;
+
 export interface ScreenShareSnapshot {
   /** Nossa transmissão, para a prévia local */
   local: MediaStream | null;
@@ -49,4 +52,7 @@ export interface VoiceEngine {
   getScreenShareSnapshot(): ScreenShareSnapshot;
   subscribeInputStatus(cb: () => void): () => void;
   getInputStatus(): InputStatus;
+  /** `Uint8Array<ArrayBuffer>` porque o LiveKit não aceita buffer compartilhado */
+  enviarEntrada(destino: string, dados: Uint8Array<ArrayBuffer>, confiavel: boolean, topico?: string): void;
+  subscribeEntrada(cb: EntradaListener): () => void;
 }

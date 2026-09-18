@@ -2,6 +2,7 @@
 // que repassa aos outros. Espelha a interface de webrtc.ts (veja VoiceEngine em voice.ts).
 import {
   ConnectionState,
+  DataPacket_Kind,
   LocalTrackPublication,
   Participant,
   RemoteParticipant,
@@ -27,7 +28,8 @@ import { InputStatusStore } from './microphone';
 import { ParticipantRoster } from './voiceParticipants';
 import { applySenderQuality, applyTrackQuality } from './screenCapture';
 import { ScreenShareState } from './screenShareState';
-import type { ParticipantsListener } from './voiceTypes';
+import type { EntradaListener, ParticipantsListener } from './voiceTypes';
+import { TOPICO_CONTROLE, TOPICO_ENTRADA } from './entradaProtocolo';
 import type { VoiceCredentials } from './voice';
 
 /** Avatar vai no metadata do token, gerado pelo servidor Rust */
@@ -61,6 +63,8 @@ class SfuVoiceService {
   private appliedScreenQuality = getVoiceSettings().screenQuality;
 
   private input = new InputStatusStore();
+  /** Quem quer ver pacote de entrada chegando; a permissão é conferida depois, por quem ouve */
+  private entradaListeners: Set<EntradaListener> = new Set();
 
   async join(
     channelId: string,
@@ -295,6 +299,30 @@ class SfuVoiceService {
     return this.room?.remoteParticipants.get(identity)?.getTrackPublication(Track.Source.ScreenShare);
   }
 
+  // ---------- Entrada do controle remoto ----------
+
+  /**
+   * Manda um pacote só para uma pessoa. O `destinationIdentities` é o que garante
+   * ponto a ponto: sem ele o LiveKit difundiria para a sala inteira, e entrada de
+   * teclado e mouse não pode chegar a mais ninguém.
+   */
+  enviarEntrada(destino: string, dados: Uint8Array<ArrayBuffer>, confiavel: boolean, topico = TOPICO_ENTRADA) {
+    this.room?.localParticipant
+      .publishData(dados, {
+        reliable: confiavel,
+        destinationIdentities: [destino],
+        topic: topico,
+      })
+      .catch((err) => console.warn('Não foi possível enviar a entrada:', err));
+  }
+
+  subscribeEntrada = (cb: EntradaListener) => {
+    this.entradaListeners.add(cb);
+    return () => {
+      this.entradaListeners.delete(cb);
+    };
+  };
+
   subscribeScreenShare = this.screen.subscribe;
 
   getScreenShareSnapshot = this.screen.getSnapshot;
@@ -360,7 +388,16 @@ class SfuVoiceService {
       .on(RoomEvent.LocalTrackUnpublished, () => this.syncParticipants())
       .on(RoomEvent.ParticipantMetadataChanged, () => this.syncParticipants())
       .on(RoomEvent.ParticipantNameChanged, () => this.syncParticipants())
-      .on(RoomEvent.ConnectionStateChanged, () => this.syncParticipants());
+      .on(RoomEvent.ConnectionStateChanged, () => this.syncParticipants())
+      .on(
+        RoomEvent.DataReceived,
+        (payload: Uint8Array, participant?: RemoteParticipant, _kind?: DataPacket_Kind, topic?: string) => {
+          // Sem remetente conhecido não há como conferir permissão nenhuma: descarta
+          if (!participant) return;
+          if (topic !== TOPICO_ENTRADA && topic !== TOPICO_CONTROLE) return;
+          this.entradaListeners.forEach((cb) => cb(participant.identity, payload, topic));
+        }
+      );
   }
 
   private attachAudio(identity: string, track: RemoteTrack) {

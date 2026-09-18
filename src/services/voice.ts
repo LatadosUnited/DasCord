@@ -7,6 +7,7 @@ import { webrtcVoice } from './webrtc';
 import { sfuVoice } from './sfuVoice';
 import {
   EMPTY_SCREEN_SNAPSHOT,
+  EntradaListener,
   InputStatus,
   ParticipantsListener,
   ScreenShareSnapshot,
@@ -86,6 +87,16 @@ class VoiceService {
   retryMicrophone(): Promise<boolean> {
     return this.engine?.retryMicrophone() ?? Promise.resolve(false);
   }
+
+  /** Só o SFU carrega entrada; em P2P as duas chamadas não fazem nada */
+  enviarEntrada(destino: string, dados: Uint8Array<ArrayBuffer>, confiavel: boolean, topico?: string) {
+    this.engine?.enviarEntrada(destino, dados, confiavel, topico);
+  }
+
+  subscribeEntrada = (cb: EntradaListener) => {
+    const unsubs = [webrtcVoice.subscribeEntrada(cb), sfuVoice.subscribeEntrada(cb)];
+    return () => unsubs.forEach((unsub) => unsub());
+  };
 
   // As duas implementações são observadas ao mesmo tempo; só a ativa emite algo
   subscribeScreenShare = (cb: () => void) => {
