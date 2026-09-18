@@ -401,7 +401,125 @@
   line-height: 1.4;
 }
 
+/* ---------- Tela cheia de quem controla ---------- */
+
+/*
+ * Por cima do app inteiro, inclusive da barra de título. Abaixo dos avisos do topo, que
+ * ficam em 1600: se alguém estiver controlando o PC desta pessoa ao mesmo tempo, o
+ * aviso de perigo não pode sumir atrás do jogo.
+ */
+.screen-tile.tela-cheia {
+  position: fixed;
+  inset: 0;
+  z-index: 1550;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.screen-tile.tela-cheia .screen-tile-label,
+.screen-tile.tela-cheia .screen-tile-close,
+.screen-tile.tela-cheia .screen-tile-rodape {
+  display: none;
+}
+
+/* O selo de atraso continua, mas sem roubar a atenção do jogo */
+.screen-tile.tela-cheia .latencia {
+  opacity: 0.55;
+  transition: opacity var(--transition-fast);
+}
+
+.screen-tile.tela-cheia .latencia:hover {
+  opacity: 1;
+}
+
+/* Faixa fina no topo: o mouse chegando nela faz a barra descer */
+.tela-cheia-topo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+}
+
+.tela-cheia-barra {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: fit-content;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background-color: var(--bg-floating);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-normal);
+  font-size: 13px;
+  white-space: nowrap;
+  transform: translateY(-110%);
+  transition: transform 0.18s ease;
+}
+
+.tela-cheia-barra > svg {
+  color: var(--brand);
+}
+
+.tela-cheia-topo:hover .tela-cheia-barra,
+.tela-cheia-barra.visivel,
+.tela-cheia-barra:focus-within {
+  transform: translateY(0);
+}
+
+.tela-cheia-nome strong {
+  color: var(--text-header);
+}
+
+.tela-cheia-dica {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.tela-cheia-dica kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.tela-cheia-botao {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--input-bg);
+  color: var(--text-header);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tela-cheia-botao:hover {
+  border-color: var(--brand);
+}
+
+.tela-cheia-botao.perigo:hover {
+  border-color: var(--danger);
+  background-color: var(--danger);
+  color: var(--text-on-color);
+}
+
 /* ---------- Controle remoto ---------- */
+
+.screen-tile-acoes {
+  display: flex;
+  gap: 6px;
+}
 
 /* Enquanto se controla, a borda avisa que mouse e teclado estão indo para lá */
 .screen-tile.is-controlando {

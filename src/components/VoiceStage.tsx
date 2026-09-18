@@ -1,12 +1,13 @@
 import { FC, ReactNode, useEffect, useRef, useState } from 'react';
-import { Check, Eye, EyeOff, Gamepad2, Mic, MicOff, Headphones, PhoneOff, ScreenShare, ScreenShareOff, Wifi, Volume2, X } from 'lucide-react';
+import { Check, Eye, EyeOff, Gamepad2, Maximize, Mic, MicOff, Minimize, Headphones, PhoneOff, ScreenShare, ScreenShareOff, Wifi, Volume2, X } from 'lucide-react';
 import { PeerConnectionStatus, VoiceParticipant, VoiceState } from '../types';
 import { useInputStatus, useScreenShare, useVoiceMode, voice } from '../services/voice';
 import { SCREEN_QUALITY_PRESETS, updateVoiceSettings, useVoiceSettings } from '../services/voiceSettings';
-import { controleRemoto, useControleRemoto } from '../services/controleRemoto';
+import { ATALHO_CORTE_TEXTO, controleRemoto, useControleRemoto } from '../services/controleRemoto';
 import { useCapturaControle } from '../hooks/useCapturaControle';
 import { useMonitores } from '../hooks/useMonitores';
 import { useLatencia } from '../hooks/useLatencia';
+import { useJanelaTelaCheia } from '../hooks/useJanelaTelaCheia';
 import { Latencia } from '../services/latencia';
 import { useConexaoDireta } from '../services/conexaoDireta';
 import './VoiceStage.css';
@@ -132,6 +133,14 @@ export const VoiceStage: FC<VoiceStageProps> = ({
               }}
               controlando={controle.controlando === id}
               medirDe={id}
+              telaCheia={controle.controlando === id && controle.telaCheia}
+              barra={
+                <BarraTelaCheia
+                  nome={nameOf(id)}
+                  onSair={() => controleRemoto.definirTelaCheia(false)}
+                  onDevolver={() => controleRemoto.encerrar()}
+                />
+              }
               rodape={(temVideo) =>
                 podeControlar && temVideo ? (
                   <ControleBotao
@@ -150,6 +159,7 @@ export const VoiceStage: FC<VoiceStageProps> = ({
                     onPedir={() => controleRemoto.pedir(id)}
                     onCancelar={() => controleRemoto.cancelarPedido()}
                     onDevolver={() => controleRemoto.encerrar()}
+                    onTelaCheia={() => controleRemoto.definirTelaCheia(true)}
                   />
                 ) : undefined
               }
@@ -307,6 +317,10 @@ interface ScreenTileProps {
   rodape?: ReactNode;
   /** De quem é a tela, para medir o atraso dela; a nossa própria não tem atraso a medir */
   medirDe?: string;
+  /** Ocupa o monitor inteiro, por cima do app */
+  telaCheia?: boolean;
+  /** O que aparece no topo quando em tela cheia */
+  barra?: ReactNode;
 }
 
 const ScreenTile: FC<ScreenTileProps> = ({
@@ -317,9 +331,12 @@ const ScreenTile: FC<ScreenTileProps> = ({
   controlando = false,
   rodape,
   medirDe,
+  telaCheia = false,
+  barra,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const latencia = useLatencia(medirDe && stream ? medirDe : null);
+  useJanelaTelaCheia(telaCheia);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream;
@@ -328,7 +345,7 @@ const ScreenTile: FC<ScreenTileProps> = ({
   useCapturaControle(videoRef, controlando && stream !== null);
 
   return (
-    <div className={`screen-tile ${controlando ? 'is-controlando' : ''}`}>
+    <div className={`screen-tile ${controlando ? 'is-controlando' : ''} ${telaCheia ? 'tela-cheia' : ''}`}>
       {stream ? (
         <video ref={videoRef} autoPlay playsInline muted />
       ) : (
@@ -346,6 +363,50 @@ const ScreenTile: FC<ScreenTileProps> = ({
       )}
       {rodape && <div className="screen-tile-rodape">{rodape}</div>}
       {latencia && <SeloLatencia latencia={latencia} />}
+      {telaCheia && barra}
+    </div>
+  );
+};
+
+/** Tempo que a barra fica à mostra ao entrar em tela cheia, para a pessoa saber que ela existe */
+const BARRA_VISIVEL_AO_ENTRAR_MS = 3000;
+
+interface BarraTelaCheiaProps {
+  nome: string;
+  onSair: () => void;
+  onDevolver: () => void;
+}
+
+/**
+ * Fica escondida no topo e desce quando o mouse chega lá — como no Parsec. Não dá para
+ * sair por tecla: Esc, F11 e qualquer outra podem ser justamente o que o jogo lá precisa.
+ */
+const BarraTelaCheia: FC<BarraTelaCheiaProps> = ({ nome, onSair, onDevolver }) => {
+  const [recemAberta, setRecemAberta] = useState(true);
+
+  useEffect(() => {
+    const prazo = window.setTimeout(() => setRecemAberta(false), BARRA_VISIVEL_AO_ENTRAR_MS);
+    return () => window.clearTimeout(prazo);
+  }, []);
+
+  return (
+    <div className="tela-cheia-topo">
+      <div className={`tela-cheia-barra ${recemAberta ? 'visivel' : ''}`}>
+        <Gamepad2 size={15} />
+        <span className="tela-cheia-nome">
+          Controlando o PC de <strong>{nome}</strong>
+        </span>
+        <span className="tela-cheia-dica">
+          Mouse no topo para esta barra · <kbd>{ATALHO_CORTE_TEXTO}</kbd> corta
+        </span>
+        <button className="tela-cheia-botao" onClick={onSair} title="Sair da tela cheia sem largar o controle">
+          <Minimize size={14} />
+          Sair da tela cheia
+        </button>
+        <button className="tela-cheia-botao perigo" onClick={onDevolver}>
+          Devolver controle
+        </button>
+      </div>
     </div>
   );
 };
@@ -446,15 +507,29 @@ interface ControleBotaoProps {
   onPedir: () => void;
   onCancelar: () => void;
   onDevolver: () => void;
+  onTelaCheia: () => void;
 }
 
-const ControleBotao: FC<ControleBotaoProps> = ({ estado, ocupado, onPedir, onCancelar, onDevolver }) => {
+const ControleBotao: FC<ControleBotaoProps> = ({
+  estado,
+  ocupado,
+  onPedir,
+  onCancelar,
+  onDevolver,
+  onTelaCheia,
+}) => {
   if (estado === 'controlando') {
     return (
-      <button className="screen-tile-controle ativo" onClick={onDevolver}>
-        <Gamepad2 size={14} />
-        Devolver controle
-      </button>
+      <div className="screen-tile-acoes">
+        <button className="screen-tile-controle" onClick={onTelaCheia} title="Voltar para a tela cheia">
+          <Maximize size={14} />
+          Tela cheia
+        </button>
+        <button className="screen-tile-controle ativo" onClick={onDevolver}>
+          <Gamepad2 size={14} />
+          Devolver controle
+        </button>
+      </div>
     );
   }
   if (estado === 'aguardando') {

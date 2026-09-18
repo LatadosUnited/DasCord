@@ -148,12 +148,33 @@ mod braco {
 
 pub use braco::Entrada;
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::State;
+
+/// Quanto a geometria guardada vale antes de perguntar de novo ao Windows. Curto o
+/// bastante para pegar um monitor rearranjado no meio da sessão; longo o bastante para
+/// não perguntar a cada movimento do mouse, que chega dezenas de vezes por segundo.
+const VALIDADE_GEOMETRIA: Duration = Duration::from_secs(2);
+
+/// A última leitura dos monitores e quando ela foi feita
+#[derive(Default)]
+pub struct GeometriaMonitores(Mutex<Option<(Instant, Vec<Monitor>)>>);
 
 /// Os monitores desta máquina, para quem hospeda escolher qual está compartilhando.
 /// O `getDisplayMedia` não conta qual tela a pessoa escolheu, então a escolha é dela.
+/// Sempre lê de novo, e aproveita para renovar a geometria guardada.
 #[tauri::command]
-pub fn entrada_monitores(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
+pub fn entrada_monitores(
+    app: tauri::AppHandle,
+    geometria: State<'_, GeometriaMonitores>,
+) -> Result<Vec<Monitor>, String> {
+    let monitores = ler_monitores(&app)?;
+    *geometria.0.lock().unwrap() = Some((Instant::now(), monitores.clone()));
+    Ok(monitores)
+}
+
+fn ler_monitores(app: &tauri::AppHandle) -> Result<Vec<Monitor>, String> {
     let principal = app
         .primary_monitor()
         .map_err(|e| format!("Não foi possível ler os monitores: {e}"))?
@@ -190,11 +211,9 @@ pub fn entrada_mouse_mover(
     y: f64,
     app: tauri::AppHandle,
     entrada: State<'_, Entrada>,
+    geometria: State<'_, GeometriaMonitores>,
 ) -> Result<(), String> {
-    let alvo = entrada_monitores(app)?
-        .into_iter()
-        .find(|m| m.nome == monitor)
-        .ok_or_else(|| format!("O monitor escolhido não existe mais nesta máquina: {monitor}"))?;
+    let alvo = monitor_guardado(&app, &geometria, &monitor)?;
 
     // Fora de 0..1 é pacote estragado ou ponteiro fora da tela; prender na borda é mais
     // seguro do que deixar o cursor sair para outro monitor
@@ -203,6 +222,27 @@ pub fn entrada_mouse_mover(
     let absoluto_x = alvo.x + (x * alvo.largura as f64).round() as i32;
     let absoluto_y = alvo.y + (y * alvo.altura as f64).round() as i32;
     entrada.mover_mouse(absoluto_x, absoluto_y)
+}
+
+/// O monitor pelo nome, da geometria guardada. Lê de novo quando ela venceu ou quando o
+/// monitor não está nela — pode ter acabado de ser plugado.
+fn monitor_guardado(
+    app: &tauri::AppHandle,
+    geometria: &GeometriaMonitores,
+    nome: &str,
+) -> Result<Monitor, String> {
+    let mut guarda = geometria.0.lock().unwrap();
+    if let Some((lida_em, monitores)) = guarda.as_ref() {
+        if lida_em.elapsed() < VALIDADE_GEOMETRIA {
+            if let Some(m) = monitores.iter().find(|m| m.nome == nome) {
+                return Ok(m.clone());
+            }
+        }
+    }
+    let monitores = ler_monitores(app)?;
+    let alvo = monitores.iter().find(|m| m.nome == nome).cloned();
+    *guarda = Some((Instant::now(), monitores));
+    alvo.ok_or_else(|| format!("O monitor escolhido não existe mais nesta máquina: {nome}"))
 }
 
 #[tauri::command]

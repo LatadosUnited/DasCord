@@ -69,6 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(controles::ControlesVirtuais::default())
         .manage(entrada::Entrada::default())
+        .manage(entrada::GeometriaMonitores::default())
         .invoke_handler(tauri::generate_handler![
             get_system_stats,
             send_message_native,

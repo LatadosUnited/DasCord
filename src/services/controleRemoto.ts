@@ -20,7 +20,13 @@ import {
   decodificarControle,
   ehConfiavel,
 } from './entradaProtocolo';
-import { CONTROLE_NEUTRO, conectarControle, desconectarControle, atualizarControle } from './controleVirtual';
+import {
+  CONTROLE_NEUTRO,
+  EstadoControle,
+  atualizarControle,
+  conectarControle,
+  desconectarControle,
+} from './controleVirtual';
 import { botaoMouse, listarMonitores, moverMouse, rodaMouse, tecla } from './entradaRemota';
 import { RUNS_IN_TAURI } from './appWindow';
 import { registrarPong, responderPing } from './latencia';
@@ -34,6 +40,71 @@ import { conexaoDireta } from './conexaoDireta';
 export const ATALHO_CORTE = 'CommandOrControl+Shift+F12';
 export const ATALHO_CORTE_TEXTO = 'Ctrl+Shift+F12';
 
+/**
+ * Mouse e teclado de quem controla, na ordem em que chegaram, um comando de cada vez.
+ * Cada comando é uma chamada ao Rust; sem fila, um clique podia ser aplicado antes do
+ * movimento que veio antes dele e cair no lugar errado. Movimento que ainda não saiu é
+ * trocado pelo mais novo — fila de movimento velho é só atraso —, mas clique e tecla
+ * nunca furam a fila.
+ */
+class FilaEntrada {
+  private fila: { movimento: boolean; executar: () => Promise<unknown> }[] = [];
+  private ocupada = false;
+
+  mover(executar: () => Promise<unknown>) {
+    const ultimo = this.fila[this.fila.length - 1];
+    if (ultimo?.movimento) ultimo.executar = executar;
+    else this.fila.push({ movimento: true, executar });
+    this.andar();
+  }
+
+  outro(executar: () => Promise<unknown>) {
+    this.fila.push({ movimento: false, executar });
+    this.andar();
+  }
+
+  private andar() {
+    if (this.ocupada) return;
+    const item = this.fila.shift();
+    if (!item) return;
+    this.ocupada = true;
+    item
+      .executar()
+      .catch(() => {})
+      .finally(() => {
+        this.ocupada = false;
+        this.andar();
+      });
+  }
+}
+
+/**
+ * Para o controle de cada pessoa: enquanto uma atualização não volta do Rust, só a mais
+ * nova que chegar importa. Estado de controle é sempre o estado inteiro, então pular os
+ * do meio não perde nada.
+ */
+function ultimoVence(executar: (estado: EstadoControle) => Promise<unknown>) {
+  let ocupado = false;
+  let proximo: EstadoControle | null = null;
+  const rodar = (estado: EstadoControle) => {
+    ocupado = true;
+    executar(estado)
+      .catch(() => {})
+      .finally(() => {
+        ocupado = false;
+        if (proximo) {
+          const seguinte = proximo;
+          proximo = null;
+          rodar(seguinte);
+        }
+      });
+  };
+  return (estado: EstadoControle) => {
+    if (ocupado) proximo = estado;
+    else rodar(estado);
+  };
+}
+
 export interface ControleRemotoSnapshot {
   /** Quem pediu controle desta máquina e ainda não foi respondido */
   pedidos: string[];
@@ -45,6 +116,8 @@ export interface ControleRemotoSnapshot {
   controlando: string | null;
   /** Pedimos controle e ainda não houve resposta */
   aguardando: string | null;
+  /** A tela de quem controlamos ocupa o monitor inteiro */
+  telaCheia: boolean;
 }
 
 const VAZIO: ControleRemotoSnapshot = {
@@ -53,6 +126,7 @@ const VAZIO: ControleRemotoSnapshot = {
   monitor: null,
   controlando: null,
   aguardando: null,
+  telaCheia: false,
 };
 
 class ControleRemotoService {
@@ -61,6 +135,10 @@ class ControleRemotoService {
   private monitor: string | null = null;
   private controlando: string | null = null;
   private aguardando: string | null = null;
+  private telaCheia = false;
+
+  private filaEntrada = new FilaEntrada();
+  private controles = new Map<string, (estado: EstadoControle) => void>();
 
   /** O que cada pessoa está segurando agora, para soltar tudo quando o controle acabar */
   private teclasPresas = new Map<string, Set<number>>();
@@ -179,6 +257,22 @@ class ControleRemotoService {
 
   // ---------- Lado de quem hospeda ----------
 
+  /** Quem controla sai e volta da tela cheia sem largar o controle */
+  definirTelaCheia(ativa: boolean) {
+    if (!this.controlando) return;
+    this.telaCheia = ativa;
+    this.notificar();
+  }
+
+  private controleDe(quem: string) {
+    let atualizar = this.controles.get(quem);
+    if (!atualizar) {
+      atualizar = ultimoVence((estado) => atualizarControle(quem, estado));
+      this.controles.set(quem, atualizar);
+    }
+    return atualizar;
+  }
+
   definirMonitor(nome: string | null) {
     this.monitor = nome;
     this.notificar();
@@ -224,11 +318,14 @@ class ControleRemotoService {
    * um "W" segurado deixa a tecla presa para sempre na máquina de quem hospeda.
    */
   private soltarTudo(quem: string) {
-    this.teclasPresas.get(quem)?.forEach((vk) => tecla(vk, false).catch(() => {}));
+    // Pela mesma fila: um "soltou" que furasse a fila podia ser desfeito por um "apertou"
+    // que já estava nela
+    this.teclasPresas.get(quem)?.forEach((vk) => this.filaEntrada.outro(() => tecla(vk, false)));
     this.teclasPresas.delete(quem);
-    this.botoesPresos.get(quem)?.forEach((botao) => botaoMouse(botao, false).catch(() => {}));
+    this.botoesPresos.get(quem)?.forEach((botao) => this.filaEntrada.outro(() => botaoMouse(botao, false)));
     this.botoesPresos.delete(quem);
-    atualizarControle(quem, CONTROLE_NEUTRO).catch(() => {});
+    this.controleDe(quem)(CONTROLE_NEUTRO);
+    this.controles.delete(quem);
   }
 
   private receberEntrada(de: string, dados: Uint8Array) {
@@ -242,21 +339,23 @@ class ControleRemotoService {
   private aplicar(de: string, pacote: PacoteEntrada) {
     switch (pacote.tipo) {
       case TIPO.controle:
-        atualizarControle(de, pacote).catch(() => {});
+        this.controleDe(de)(pacote);
         break;
-      case TIPO.mouseMover:
-        if (this.monitor) moverMouse(this.monitor, pacote.x, pacote.y).catch(() => {});
+      case TIPO.mouseMover: {
+        const monitor = this.monitor;
+        if (monitor) this.filaEntrada.mover(() => moverMouse(monitor, pacote.x, pacote.y));
         break;
+      }
       case TIPO.mouseBotao:
         this.anotar(this.botoesPresos, de, pacote.botao, pacote.pressionado);
-        botaoMouse(pacote.botao, pacote.pressionado).catch(() => {});
+        this.filaEntrada.outro(() => botaoMouse(pacote.botao, pacote.pressionado));
         break;
       case TIPO.mouseRoda:
-        rodaMouse(pacote.horizontal, pacote.vertical).catch(() => {});
+        this.filaEntrada.outro(() => rodaMouse(pacote.horizontal, pacote.vertical));
         break;
       case TIPO.tecla:
         this.anotar(this.teclasPresas, de, pacote.vk, pacote.pressionado);
-        tecla(pacote.vk, pacote.pressionado).catch(() => {});
+        this.filaEntrada.outro(() => tecla(pacote.vk, pacote.pressionado));
         break;
     }
   }
@@ -326,6 +425,8 @@ class ControleRemotoService {
         if (this.aguardando === de) {
           this.controlando = de;
           this.aguardando = null;
+          // Ganhou o controle, ganhou a tela inteira: é assim que se joga
+          this.telaCheia = true;
         }
         break;
       case 'negado':
@@ -348,12 +449,15 @@ class ControleRemotoService {
   }
 
   private notificar() {
+    // Sem controle não há tela cheia, venha o fim de onde vier
+    if (!this.controlando) this.telaCheia = false;
     this.snapshot = {
       pedidos: Array.from(this.pedidos),
       permitidos: Array.from(this.permitidos),
       monitor: this.monitor,
       controlando: this.controlando,
       aguardando: this.aguardando,
+      telaCheia: this.telaCheia,
     };
     this.listeners.forEach((cb) => cb());
   }

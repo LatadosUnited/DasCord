@@ -11,6 +11,18 @@ import { CONTROLE_NEUTRO, EstadoControle, mesmoEstado, padraoParaXInput } from '
  */
 const REPETIR_CONTROLE_MS = 100;
 
+/**
+ * Movimento sai na hora, com este intervalo mínimo entre um e outro: mais que isso seria
+ * pacote a mais sem ganho, já que a tela do outro lado anda a 60 quadros por segundo.
+ */
+const INTERVALO_MOUSE_MS = 4;
+
+/**
+ * O `pointermove` do Chromium é entregue alinhado aos quadros da tela; o `pointerrawupdate`
+ * chega assim que o mouse mexe. Até um quadro inteiro de diferença, só na entrada.
+ */
+const EVENTO_MOVIMENTO = 'onpointerrawupdate' in window ? 'pointerrawupdate' : 'pointermove';
+
 /** A roda do mouse chega em pixels; o Windows conta em "cliques" da roda */
 const PIXELS_POR_CLIQUE = 100;
 
@@ -42,14 +54,30 @@ export function useCapturaControle(videoRef: RefObject<HTMLVideoElement | null>,
 
     const teclas = new Set<number>();
     const botoes = new Set<number>();
-    // O mouse dispara mais eventos que quadros; manda só a posição mais recente por quadro
     let posicaoPendente: { x: number; y: number } | null = null;
+    let ultimoEnvioMouse = 0;
+    let envioAgendado = 0;
     let controleEnviado: EstadoControle = CONTROLE_NEUTRO;
     let ultimoEnvioControle = 0;
     let quadro = 0;
 
-    const aoMover = (e: MouseEvent) => {
-      posicaoPendente = posicaoNaImagem(video, e.clientX, e.clientY) ?? posicaoPendente;
+    const enviarPosicao = () => {
+      envioAgendado = 0;
+      if (!posicaoPendente) return;
+      ultimoEnvioMouse = performance.now();
+      controleRemoto.enviar({ tipo: TIPO.mouseMover, ...posicaoPendente });
+      posicaoPendente = null;
+    };
+
+    const aoMover = (e: Event) => {
+      const { clientX, clientY } = e as PointerEvent;
+      const posicao = posicaoNaImagem(video, clientX, clientY);
+      if (!posicao) return;
+      posicaoPendente = posicao;
+      const falta = INTERVALO_MOUSE_MS - (performance.now() - ultimoEnvioMouse);
+      if (falta <= 0) enviarPosicao();
+      // Dentro do intervalo: a posição mais nova sai quando ele acabar, não se perde
+      else if (!envioAgendado) envioAgendado = window.setTimeout(enviarPosicao, falta);
     };
 
     const aoApertar = (e: MouseEvent) => {
@@ -57,8 +85,15 @@ export function useCapturaControle(videoRef: RefObject<HTMLVideoElement | null>,
       if (e.button > 2) return;
       botoes.add(e.button);
       const posicao = posicaoNaImagem(video, e.clientX, e.clientY);
-      // O clique vai para onde o ponteiro está agora, não para o último quadro enviado
-      if (posicao) controleRemoto.enviar({ tipo: TIPO.mouseMover, ...posicao });
+      // O clique leva a posição de agora; um movimento agendado sairia depois dele,
+      // com a posição de antes, e arrastaria o cursor de volta
+      window.clearTimeout(envioAgendado);
+      envioAgendado = 0;
+      posicaoPendente = null;
+      if (posicao) {
+        ultimoEnvioMouse = performance.now();
+        controleRemoto.enviar({ tipo: TIPO.mouseMover, ...posicao });
+      }
       controleRemoto.enviar({ tipo: TIPO.mouseBotao, botao: e.button, pressionado: true });
     };
 
@@ -104,11 +139,6 @@ export function useCapturaControle(videoRef: RefObject<HTMLVideoElement | null>,
     const aCadaQuadro = (agora: number) => {
       quadro = requestAnimationFrame(aCadaQuadro);
 
-      if (posicaoPendente) {
-        controleRemoto.enviar({ tipo: TIPO.mouseMover, ...posicaoPendente });
-        posicaoPendente = null;
-      }
-
       const fisico = navigator.getGamepads().find((g): g is Gamepad => !!g);
       if (!fisico) return;
       const estado = padraoParaXInput(fisico);
@@ -119,7 +149,7 @@ export function useCapturaControle(videoRef: RefObject<HTMLVideoElement | null>,
       controleRemoto.enviar({ tipo: TIPO.controle, ...estado });
     };
 
-    video.addEventListener('mousemove', aoMover);
+    video.addEventListener(EVENTO_MOVIMENTO, aoMover);
     video.addEventListener('mousedown', aoApertar);
     video.addEventListener('wheel', aoRolar, { passive: false });
     video.addEventListener('contextmenu', semMenu);
@@ -131,7 +161,8 @@ export function useCapturaControle(videoRef: RefObject<HTMLVideoElement | null>,
 
     return () => {
       cancelAnimationFrame(quadro);
-      video.removeEventListener('mousemove', aoMover);
+      window.clearTimeout(envioAgendado);
+      video.removeEventListener(EVENTO_MOVIMENTO, aoMover);
       video.removeEventListener('mousedown', aoApertar);
       video.removeEventListener('wheel', aoRolar);
       video.removeEventListener('contextmenu', semMenu);

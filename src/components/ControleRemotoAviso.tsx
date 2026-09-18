@@ -11,7 +11,7 @@ import './ControleRemotoAviso.css';
  * ver isso sempre, e precisa do botão de cortar a um clique.
  */
 export const ControleRemotoAviso: FC<{ participants: VoiceParticipant[] }> = ({ participants }) => {
-  const { pedidos, permitidos, controlando, aguardando } = useControleRemoto();
+  const { pedidos, permitidos, controlando, aguardando, telaCheia } = useControleRemoto();
   const transmitindo = useScreenShare().local !== null;
   const nomeDe = (id: string) => participants.find((p) => p.id === id)?.name ?? 'Alguém';
 
@@ -54,7 +54,8 @@ export const ControleRemotoAviso: FC<{ participants: VoiceParticipant[] }> = ({ 
         </div>
       ))}
 
-      {controlando && (
+      {/* Em tela cheia quem controla já tem a barra do topo; o aviso cobriria o jogo */}
+      {controlando && !telaCheia && (
         <div className="controle-aviso" role="status">
           <Gamepad2 size={18} />
           <span className="controle-aviso-texto">
