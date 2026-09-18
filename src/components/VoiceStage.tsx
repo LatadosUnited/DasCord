@@ -8,7 +8,8 @@ import { useCapturaControle } from '../hooks/useCapturaControle';
 import { useMonitores } from '../hooks/useMonitores';
 import { useLatencia } from '../hooks/useLatencia';
 import { useJanelaTelaCheia } from '../hooks/useJanelaTelaCheia';
-import { Latencia } from '../services/latencia';
+import { Latencia, textoLatencia } from '../services/latencia';
+import { APP_VERSION } from '../services/version';
 import { useConexaoDireta } from '../services/conexaoDireta';
 import './VoiceStage.css';
 
@@ -362,7 +363,7 @@ const ScreenTile: FC<ScreenTileProps> = ({
         </button>
       )}
       {rodape && <div className="screen-tile-rodape">{rodape}</div>}
-      {latencia && <SeloLatencia latencia={latencia} />}
+      {latencia && <SeloLatencia latencia={latencia} nome={label} />}
       {telaCheia && barra}
     </div>
   );
@@ -421,8 +422,26 @@ const faixa = (total: number | null) =>
  * O número que importa para quem joga é do clique até ver o resultado. Ele vem somado
  * de partes, e as partes ficam à mostra para dar para ver qual está pesando.
  */
-const SeloLatencia: FC<{ latencia: Latencia }> = ({ latencia: l }) => {
+const SeloLatencia: FC<{ latencia: Latencia; nome: string }> = ({ latencia: l, nome }) => {
   const [aberto, setAberto] = useState(false);
+  const [copiado, setCopiado] = useState(false);
+
+  const copiar = async () => {
+    const texto = textoLatencia(l, nome, APP_VERSION);
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      // Sem permissão para a área de transferência: o caminho antigo ainda funciona
+      const campo = document.createElement('textarea');
+      campo.value = texto;
+      document.body.appendChild(campo);
+      campo.select();
+      document.execCommand('copy');
+      campo.remove();
+    }
+    setCopiado(true);
+    window.setTimeout(() => setCopiado(false), 2000);
+  };
 
   return (
     <div className="latencia">
@@ -491,6 +510,9 @@ const SeloLatencia: FC<{ latencia: Latencia }> = ({ latencia: l }) => {
               volta, só dá para medir o que acontece deste lado.
             </div>
           )}
+          <button className="latencia-copiar" onClick={copiar}>
+            {copiado ? 'Copiado — cole no chat' : 'Copiar números'}
+          </button>
           <div className="latencia-nota">
             Ida e volta é medida; o resto das partes, estimado a partir dela. Sem relógio comum entre as duas
             máquinas não dá para medir só a ida.

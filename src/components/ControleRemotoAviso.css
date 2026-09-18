@@ -55,6 +55,31 @@
   color: var(--text-header);
 }
 
+/* Uma linha por pessoa, embaixo do aviso: números, não texto corrido */
+.controle-aviso-medida {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.controle-aviso-caminho {
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background-color: var(--input-bg);
+  color: var(--text-muted);
+}
+
+.controle-aviso-caminho.direto {
+  background-color: var(--success-soft);
+  color: var(--success-text);
+}
+
 .controle-aviso-texto kbd {
   padding: 1px 5px;
   border: 1px solid var(--border-strong);

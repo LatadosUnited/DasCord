@@ -87,6 +87,27 @@ export function registrarPong(de: string, t: number, codificacao: number | null)
   esperandoPong.get(de)?.forEach((ouvinte) => ouvinte(t, codificacao));
 }
 
+function ouvirPong(peerId: string, ouvinte: Ouvinte): () => void {
+  const ouvintes = esperandoPong.get(peerId) ?? new Set<Ouvinte>();
+  ouvintes.add(ouvinte);
+  esperandoPong.set(peerId, ouvintes);
+  return () => {
+    ouvintes.delete(ouvinte);
+    if (!ouvintes.size) esperandoPong.delete(peerId);
+  };
+}
+
+/**
+ * Pelo caminho que pode perder pacote: retransmitir um ping perdido inflaria a medida.
+ * Pela conexão direta quando ela existe, que é por onde a imagem e a entrada vão.
+ */
+function enviarPing(peerId: string) {
+  const ping = codificarControle({ tipo: 'ping', t: performance.now() });
+  if (!conexaoDireta.enviarTexto(peerId, new TextDecoder().decode(ping))) {
+    voice.enviarEntrada(peerId, ping, false, TOPICO_CONTROLE);
+  }
+}
+
 /** Mede sem parar a tela de `peerId` até o retorno ser chamado */
 export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) => void): () => void {
   const idasEVoltas: number[] = [];
@@ -95,21 +116,14 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
   let pingsEnviados = 0;
   let receptorAnterior: RTCRtpReceiver | null = null;
 
-  const aoPong: Ouvinte = (t, codificacaoRemota) => {
+  const pararDeOuvir = ouvirPong(peerId, (t, codificacaoRemota) => {
     idasEVoltas.push(performance.now() - t);
     if (idasEVoltas.length > AMOSTRAS) idasEVoltas.shift();
     codificacao = codificacaoRemota;
-  };
-  const ouvintes = esperandoPong.get(peerId) ?? new Set<Ouvinte>();
-  ouvintes.add(aoPong);
-  esperandoPong.set(peerId, ouvintes);
+  });
 
   const medir = async () => {
-    // Pelo caminho que pode perder pacote: retransmitir um ping perdido inflaria a medida
-    const ping = codificarControle({ tipo: 'ping', t: performance.now() });
-    if (!conexaoDireta.enviarTexto(peerId, new TextDecoder().decode(ping))) {
-      voice.enviarEntrada(peerId, ping, false, TOPICO_CONTROLE);
-    }
+    enviarPing(peerId);
     pingsEnviados++;
 
     const direto = conexaoDireta.receptor(peerId);
@@ -180,9 +194,78 @@ export function medirLatencia(peerId: string, aoAtualizar: (latencia: Latencia) 
 
   return () => {
     window.clearInterval(intervalo);
-    ouvintes.delete(aoPong);
-    if (!ouvintes.size) esperandoPong.delete(peerId);
+    pararDeOuvir();
   };
+}
+
+/**
+ * O que quem hospeda consegue saber de quem controla. A imagem não volta para cá, então
+ * o atraso dela não dá para medir deste lado — mas a rede, a codificação da nossa placa
+ * e o caminho, dá.
+ */
+export interface MedidaHospedagem {
+  idaEVolta: number | null;
+  codificacao: number | null;
+  caminho: 'direto' | 'servidor';
+}
+
+export function medirHospedagem(peerId: string, aoAtualizar: (medida: MedidaHospedagem) => void): () => void {
+  const idasEVoltas: number[] = [];
+  let caminhoAnterior: MedidaHospedagem['caminho'] | null = null;
+  const pararDeOuvir = ouvirPong(peerId, (t) => {
+    idasEVoltas.push(performance.now() - t);
+    if (idasEVoltas.length > AMOSTRAS) idasEVoltas.shift();
+  });
+
+  const medir = async () => {
+    enviarPing(peerId);
+    const emissorDireto = conexaoDireta.emissor(peerId);
+    const caminho = emissorDireto ? 'direto' : 'servidor';
+    // Trocou de caminho: as idas e voltas do outro não dizem nada sobre este
+    if (caminho !== caminhoAnterior) {
+      caminhoAnterior = caminho;
+      idasEVoltas.length = 0;
+    }
+    const codificacao = await codificacaoLocal(emissorDireto ?? voice.getScreenSender());
+    aoAtualizar({ idaEVolta: idasEVoltas.length ? mediana(idasEVoltas) : null, codificacao, caminho });
+  };
+
+  const intervalo = window.setInterval(() => {
+    medir().catch(() => {});
+  }, INTERVALO_MS);
+
+  return () => {
+    window.clearInterval(intervalo);
+    pararDeOuvir();
+  };
+}
+
+const ms = (valor: number | null) => (valor === null ? '—' : `${Math.round(valor)} ms`);
+
+/**
+ * Os números do painel em texto corrido, para colar no chat: num teste entre duas casas,
+ * quem assiste é quem tem os números, e quem transmite é quem quer vê-los.
+ */
+export function textoLatencia(l: Latencia, nome: string, versao: string): string {
+  const video = [
+    l.resolucao,
+    l.codec?.toUpperCase(),
+    l.fps === null ? null : `${Math.round(l.fps)} fps`,
+    l.perda === null ? null : `${(l.perda * 100).toFixed(1)}% perdido`,
+  ].filter(Boolean);
+  return [
+    `DasCord ${versao} — atraso da tela de ${nome} (${new Date().toLocaleString('pt-BR')})`,
+    `Caminho: ${l.caminho === 'direto' ? 'direto entre as duas casas' : 'pelo servidor'}${l.relay ? ' (via relay)' : ''}`,
+    `Do clique até a tela: ${ms(l.total)}`,
+    `  comando chegar lá: ${ms(l.entrada)}`,
+    `  imagem chegar aqui: ${ms(l.imagem)}`,
+    `Rede, ida e volta: ${ms(l.idaEVolta)}`,
+    `Codificar lá: ${ms(l.codificacao)}`,
+    `Espera contra oscilação aqui: ${ms(l.jitterBuffer)}`,
+    `Decodificar aqui: ${ms(l.decodificacao)}`,
+    `Vídeo: ${video.join(' · ') || '—'}`,
+    ...(l.semResposta ? ['Sem resposta ao ping: o outro lado provavelmente está numa versão anterior'] : []),
+  ].join('\n');
 }
 
 // ---------- Lado de quem transmite ----------

@@ -3,6 +3,8 @@ import { Gamepad2, Hand, ShieldAlert } from 'lucide-react';
 import { VoiceParticipant } from '../types';
 import { ATALHO_CORTE_TEXTO, controleRemoto, useControleRemoto } from '../services/controleRemoto';
 import { useScreenShare } from '../services/voice';
+import { MedidaHospedagem } from '../services/latencia';
+import { useMedidasHospedagem } from '../hooks/useMedidasHospedagem';
 import './ControleRemotoAviso.css';
 
 /**
@@ -10,9 +12,32 @@ import './ControleRemotoAviso.css';
  * qualquer tela do app — não só no palco de voz. Quem está sendo controlado precisa
  * ver isso sempre, e precisa do botão de cortar a um clique.
  */
+const ms = (valor: number | null) => (valor === null ? '—' : `${Math.round(valor)} ms`);
+
+/**
+ * O que dá para saber deste lado. O atraso da imagem só quem assiste mede — ela não volta
+ * para cá —, então a linha não finge um total que não tem.
+ */
+const LinhaMedida: FC<{ nome: string | null; medida: MedidaHospedagem | undefined }> = ({ nome, medida }) => (
+  <span className="controle-aviso-medida">
+    {nome && <strong>{nome}: </strong>}
+    {medida ? (
+      <>
+        <span className={`controle-aviso-caminho ${medida.caminho}`}>
+          {medida.caminho === 'direto' ? 'direto' : 'servidor'}
+        </span>
+        {' · '}rede {ms(medida.idaEVolta)} ida e volta{' · '}codificação {ms(medida.codificacao)}
+      </>
+    ) : (
+      'medindo...'
+    )}
+  </span>
+);
+
 export const ControleRemotoAviso: FC<{ participants: VoiceParticipant[] }> = ({ participants }) => {
   const { pedidos, permitidos, controlando, aguardando, telaCheia } = useControleRemoto();
   const transmitindo = useScreenShare().local !== null;
+  const medidas = useMedidasHospedagem(permitidos);
   const nomeDe = (id: string) => participants.find((p) => p.id === id)?.name ?? 'Alguém';
 
   if (!pedidos.length && !permitidos.length && !controlando && !aguardando) return null;
@@ -26,6 +51,14 @@ export const ControleRemotoAviso: FC<{ participants: VoiceParticipant[] }> = ({ 
             <strong>{permitidos.map(nomeDe).join(', ')}</strong>{' '}
             {permitidos.length === 1 ? 'está' : 'estão'} controlando seu PC.{' '}
             <kbd>{ATALHO_CORTE_TEXTO}</kbd> corta de qualquer lugar.
+            {permitidos.map((id) => (
+              <LinhaMedida
+                key={id}
+                // Com uma pessoa só, o nome já está no começo do aviso
+                nome={permitidos.length > 1 ? nomeDe(id) : null}
+                medida={medidas[id]}
+              />
+            ))}
           </span>
           <button className="controle-aviso-acao perigo" onClick={() => controleRemoto.cortarTudo()}>
             Cortar agora
