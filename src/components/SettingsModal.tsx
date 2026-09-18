@@ -1,11 +1,13 @@
 import { FC, useEffect, useState } from 'react';
-import { Gamepad2, LogOut, Mic, Palette, User as UserIcon, X } from 'lucide-react';
+import { Gamepad2, LogOut, Mic, Palette, RefreshCw, User as UserIcon, X } from 'lucide-react';
 import { SettingsTab, User } from '../types';
 import { AccountTab } from './settings/AccountTab';
 import { ProfileTab } from './settings/ProfileTab';
 import { CoopTab } from './settings/CoopTab';
 import { VoiceTab } from './settings/VoiceTab';
 import { APP_VERSION } from '../services/version';
+import { RUNS_IN_TAURI } from '../services/appWindow';
+import { AppUpdateState, UpdateCheckStatus } from '../hooks/useAppUpdate';
 import './settings/settings.css';
 
 interface SettingsModalProps {
@@ -13,6 +15,7 @@ interface SettingsModalProps {
   initialTab: SettingsTab;
   /** null: servidor offline ou anterior à 0.2.0 */
   serverVersion: string | null;
+  appUpdate: AppUpdateState;
   onClose: () => void;
   onLogout: () => void;
   onUserUpdated: (user: User) => void;
@@ -42,6 +45,14 @@ const GROUPS: { title: string; tabs: TabInfo[] }[] = [
   },
 ];
 
+// Achar versão nova não tem texto aqui: o aviso de atualização aparece sozinho
+const CHECK_MESSAGE: Record<UpdateCheckStatus, string | null> = {
+  idle: null,
+  checking: null,
+  'up-to-date': 'Você está na versão mais recente.',
+  error: 'Não foi possível verificar agora.',
+};
+
 const TAB_TITLE: Record<SettingsTab, string> = {
   account: 'Minha Conta',
   profile: 'Perfil',
@@ -53,6 +64,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
   user,
   initialTab,
   serverVersion,
+  appUpdate,
   onClose,
   onLogout,
   onUserUpdated,
@@ -125,6 +137,25 @@ export const SettingsModal: FC<SettingsModalProps> = ({
             <br />
             Servidor {serverVersion ? `v${serverVersion}` : 'desconhecido'}
           </div>
+
+          {/* No navegador a página já é a versão mais nova que o servidor tem */}
+          {RUNS_IN_TAURI && (
+            <div className="settings-nav-update">
+              <button
+                className="settings-nav-update-btn"
+                onClick={appUpdate.checkNow}
+                disabled={appUpdate.checkStatus === 'checking' || appUpdate.installing}
+              >
+                <RefreshCw size={12} className={appUpdate.checkStatus === 'checking' ? 'spinning' : ''} />
+                {appUpdate.checkStatus === 'checking' ? 'Verificando...' : 'Verificar atualizações'}
+              </button>
+              {CHECK_MESSAGE[appUpdate.checkStatus] && (
+                <span className={`settings-nav-update-msg ${appUpdate.checkStatus}`}>
+                  {CHECK_MESSAGE[appUpdate.checkStatus]}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </nav>
 

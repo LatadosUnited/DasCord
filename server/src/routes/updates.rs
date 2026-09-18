@@ -39,6 +39,12 @@ struct UpdateResponse {
     signature: String,
 }
 
+#[derive(Serialize)]
+struct DownloadResponse {
+    version: String,
+    url: String,
+}
+
 /// `GET /api/update/{target}/{arch}/{current_version}`. Sem sessão: o app
 /// confere antes do login, e o que sai daqui é o mesmo instalador para todos.
 pub async fn update_handler(
@@ -49,29 +55,13 @@ pub async fn update_handler(
         return json_error(StatusCode::BAD_REQUEST, "Versão do app inválida.").into_response();
     };
 
-    let manifest = match read_manifest(&state).await {
-        Ok(Some(manifest)) => manifest,
-        // Nada publicado ainda não é erro: só não há o que oferecer
+    let (manifest, latest, file_name) = match published_installer(&state, &target, &arch).await {
+        Ok(Some(found)) => found,
         Ok(None) => return StatusCode::NO_CONTENT.into_response(),
-        Err(reason) => return unavailable(&reason),
-    };
-    let Some(latest) = parse_version(&manifest.version) else {
-        return unavailable(&format!("versão \"{}\" do latest.json é inválida", manifest.version));
+        Err(response) => return response,
     };
     if latest <= current {
         return StatusCode::NO_CONTENT.into_response();
-    }
-    // Plataforma sem instalador publicado fica na versão que tem, em vez de ver erro
-    let Some(file_name) = manifest.platforms.get(&format!("{target}-{arch}")) else {
-        return StatusCode::NO_CONTENT.into_response();
-    };
-    if !is_plain_file_name(file_name) {
-        return unavailable(&format!("nome de instalador inválido no latest.json: \"{file_name}\""));
-    }
-
-    let installer = state.updates_dir.join(file_name);
-    if !tokio::fs::try_exists(&installer).await.unwrap_or(false) {
-        return unavailable(&format!("instalador {} não está na pasta", installer.display()));
     }
     // A assinatura vem do .sig do build, não copiada à mão para o manifesto:
     // um caractere trocado e todo app instalado recusaria a atualização.
@@ -89,6 +79,54 @@ pub async fn update_handler(
         signature,
     })
     .into_response()
+}
+
+/// `GET /api/download/{target}/{arch}`: o instalador para quem ainda usa o app
+/// pelo navegador. É o mesmo arquivo que o updater entrega, então instalar por
+/// aqui já deixa a pessoa no caminho das atualizações automáticas.
+pub async fn download_handler(
+    State(state): State<Arc<AppState>>,
+    Path((target, arch)): Path<(String, String)>,
+) -> Response {
+    match published_installer(&state, &target, &arch).await {
+        Ok(Some((manifest, _, file_name))) => Json(DownloadResponse {
+            version: manifest.version,
+            url: format!("{}/updates/{}", state.public_url, file_name),
+        })
+        .into_response(),
+        Ok(None) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+/// O instalador publicado para a plataforma, já conferido na pasta. `None` quando
+/// não há o que oferecer; publicação quebrada volta como a resposta de erro pronta.
+async fn published_installer(
+    state: &AppState,
+    target: &str,
+    arch: &str,
+) -> Result<Option<(Manifest, (u64, u64, u64), String)>, Response> {
+    let manifest = match read_manifest(state).await {
+        Ok(Some(manifest)) => manifest,
+        // Nada publicado ainda não é erro: só não há o que oferecer
+        Ok(None) => return Ok(None),
+        Err(reason) => return Err(unavailable(&reason)),
+    };
+    let Some(latest) = parse_version(&manifest.version) else {
+        return Err(unavailable(&format!("versão \"{}\" do latest.json é inválida", manifest.version)));
+    };
+    // Plataforma sem instalador publicado fica na versão que tem, em vez de ver erro
+    let Some(file_name) = manifest.platforms.get(&format!("{target}-{arch}")).cloned() else {
+        return Ok(None);
+    };
+    if !is_plain_file_name(&file_name) {
+        return Err(unavailable(&format!("nome de instalador inválido no latest.json: \"{file_name}\"")));
+    }
+    let installer = state.updates_dir.join(&file_name);
+    if !tokio::fs::try_exists(&installer).await.unwrap_or(false) {
+        return Err(unavailable(&format!("instalador {} não está na pasta", installer.display())));
+    }
+    Ok(Some((manifest, latest, file_name)))
 }
 
 async fn read_manifest(state: &AppState) -> Result<Option<Manifest>, String> {

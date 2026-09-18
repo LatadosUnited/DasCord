@@ -101,6 +101,57 @@
   color: var(--text-subtle);
 }
 
+.settings-nav-update {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 10px 0;
+}
+
+.settings-nav-update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-nav-update-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--interactive-hover);
+}
+
+.settings-nav-update-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.settings-nav-update-btn .spinning {
+  animation: settingsUpdateSpin 1s linear infinite;
+}
+
+@keyframes settingsUpdateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.settings-nav-update-msg {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-subtle);
+}
+
+.settings-nav-update-msg.error {
+  color: var(--danger);
+}
+
 .settings-content {
   flex: 1 1 800px;
   display: flex;

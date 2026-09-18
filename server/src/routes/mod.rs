@@ -35,6 +35,7 @@ pub fn router(avatars_dir: &Path, icons_dir: &Path, updates_dir: &Path) -> Route
             "/api/update/{target}/{arch}/{current_version}",
             get(updates::update_handler),
         )
+        .route("/api/download/{target}/{arch}", get(updates::download_handler))
         .route("/api/snowflake", get(meta::snowflake_handler))
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))

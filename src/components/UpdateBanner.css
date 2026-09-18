@@ -48,6 +48,11 @@
   cursor: pointer;
 }
 
+/* O convite para baixar o app usa um link no lugar do botão */
+a.update-banner-action {
+  text-decoration: none;
+}
+
 .update-banner-action:hover {
   filter: brightness(1.1);
 }

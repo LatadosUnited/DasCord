@@ -9,6 +9,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - **Controle remoto, estilo Parsec.** Assistindo à tela de alguém num canal de voz, o botão "Pedir controle" pede para usar o PC da pessoa — teclado, mouse e controle. Ela vê o pedido em qualquer tela do app e decide; aceitando, o mouse sobre a tela dela, o teclado e o seu controle passam a valer lá. O controle vira um Xbox virtual na máquina dela, então jogo nenhum sabe a diferença.
 - **Quem é controlado nunca perde o controle da própria máquina.** Enquanto alguém controla, um aviso fica fixo no topo com o botão "Cortar agora", e `Ctrl+Shift+F12` corta de qualquer lugar, inclusive com o jogo em tela cheia. Parar de transmitir a tela, sair da chamada ou a outra pessoa cair também cortam, e o que ela estava segurando (tecla, botão) é solto na hora.
 - Com mais de um monitor, quem transmite escolhe em qual deles o mouse de quem controla cai.
+- **Quem usa pelo navegador pode baixar o app.** No Windows, um aviso oferece o instalador da versão publicada, o mesmo que o app usa para se atualizar. "Agora não" vale até sair uma versão nova.
+- **Botão "Verificar atualizações"** nas Configurações, embaixo da versão do app: pergunta na hora, sem esperar a consulta automática. Se houver versão nova, o aviso de atualização aparece (mesmo que tenha sido dispensado antes); se não, diz que você está na mais recente.
+
+### Alterado
+- **O app confere atualização a cada 15 minutos**, não mais a cada 6 horas: uma versão publicada chega em minutos a quem deixa o app aberto.
 
 ## [0.3.0] - 2026-09-17
 

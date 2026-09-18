@@ -2,20 +2,19 @@
 // instalador só é aceito se estiver assinado com a chave do projeto — quem
 // confere é o próprio Tauri, com a chave pública gravada em tauri.conf.json.
 //
-// No navegador nada disso existe: os imports falham e o app segue sem aviso.
+// No navegador nada disso existe: quem chama só consulta dentro do app desktop.
 
 import type { Update } from '@tauri-apps/plugin-updater';
 
 export type { Update };
 
-/** null quando não há versão nova, o app roda no navegador ou o servidor não respondeu */
+/**
+ * null quando não há versão nova. Falha (servidor fora, rede) sobe como erro:
+ * a consulta periódica ignora, mas quem clicou em "Verificar" precisa saber.
+ */
 export async function checkForAppUpdate(): Promise<Update | null> {
-  try {
-    const { check } = await import('@tauri-apps/plugin-updater');
-    return await check();
-  } catch {
-    return null;
-  }
+  const { check } = await import('@tauri-apps/plugin-updater');
+  return await check();
 }
 
 /**

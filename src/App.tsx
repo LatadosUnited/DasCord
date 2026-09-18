@@ -17,6 +17,7 @@ import { InviteModal } from './components/servers/InviteModal';
 import { ServerSettingsModal } from './components/servers/ServerSettingsModal';
 import { VersionBanner } from './components/VersionBanner';
 import { UpdateBanner } from './components/UpdateBanner';
+import { DownloadBanner } from './components/DownloadBanner';
 import { ControleRemotoAviso } from './components/ControleRemotoAviso';
 import { Channel, SettingsTab, User, UserStatus } from './types';
 import { apiUpdatePresence } from './services/users';
@@ -32,6 +33,7 @@ import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 import { useSystemStats } from './hooks/useSystemStats';
 import { useServerVersion } from './hooks/useServerVersion';
 import { useAppUpdate } from './hooks/useAppUpdate';
+import { useDesktopDownload } from './hooks/useDesktopDownload';
 import './App.css';
 
 /**
@@ -77,6 +79,7 @@ export function App() {
   const { stats, refresh: refreshStats } = useSystemStats();
   const serverVersion = useServerVersion(serverOnline);
   const appUpdate = useAppUpdate();
+  const desktopDownload = useDesktopDownload();
 
   // UI Panels & Modals
   const [showMemberList, setShowMemberList] = useState(true);
@@ -162,6 +165,7 @@ export function App() {
         <AuthScreen onLogin={session.signIn} />
         <VersionBanner serverVersion={serverVersion} />
         <UpdateBanner state={appUpdate} />
+        <DownloadBanner state={desktopDownload} />
       </>
     );
   }
@@ -312,6 +316,7 @@ export function App() {
           user={currentUser}
           initialTab={settingsTab}
           serverVersion={serverVersion?.version ?? null}
+          appUpdate={appUpdate}
           onClose={() => setSettingsTab(null)}
           onLogout={session.requestLogout}
           onUserUpdated={applyUserUpdate}
@@ -320,6 +325,7 @@ export function App() {
 
       <VersionBanner serverVersion={serverVersion} />
       <UpdateBanner state={appUpdate} />
+      <DownloadBanner state={desktopDownload} />
       <ControleRemotoAviso participants={voice.voiceState.participants} />
 
       {channelDialog && currentServer && (

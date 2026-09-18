@@ -174,6 +174,10 @@ não vai no manifesto: o servidor lê do `.sig`. Se faltar o instalador ou a ass
 se o `latest.json` estiver malformado, o app recebe `503`, e o motivo aparece no log do
 servidor. Plataforma que não está na lista continua na versão que tem.
 
+O mesmo instalador é oferecido a quem usa o DasCord pelo navegador: `GET /api/download/windows/x86_64`
+devolve a versão e o endereço do arquivo (ou `204` se nada foi publicado). Os apps instalados
+conferem a cada 15 minutos e ao abrir.
+
 ## Subindo na VPS
 
 `scripts/deploy.sh` atualiza o servidor: `git pull`, compila **na VPS** (o build do Windows não
