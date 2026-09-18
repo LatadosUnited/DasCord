@@ -28,6 +28,8 @@ tauri-plugin-process = "2.3.1"
 # Controles virtuais do co-op remoto: fala com o driver ViGEmBus, que só existe no Windows
 [target.'cfg(windows)'.dependencies]
 vigem-client = "0.1"
+# Teclado e mouse de quem controla: embrulha o SendInput, sem driver nenhum
+enigo = "0.6"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
