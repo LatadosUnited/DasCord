@@ -93,6 +93,14 @@ class VoiceService {
     this.engine?.enviarEntrada(destino, dados, confiavel, topico);
   }
 
+  getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
+    return this.engine?.getScreenReceiver(peerId);
+  }
+
+  getScreenSender(): RTCRtpSender | undefined {
+    return this.engine?.getScreenSender();
+  }
+
   subscribeEntrada = (cb: EntradaListener) => {
     const unsubs = [webrtcVoice.subscribeEntrada(cb), sfuVoice.subscribeEntrada(cb)];
     return () => unsubs.forEach((unsub) => unsub());

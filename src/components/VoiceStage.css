@@ -278,6 +278,113 @@
   color: var(--text-on-color);
 }
 
+/* ---------- Atraso da transmissão ---------- */
+
+/* No canto de cima, do lado oposto ao botão de fechar */
+.latencia {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+}
+
+.latencia-selo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-overlay);
+  color: var(--text-header);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.latencia-selo.bom {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.latencia-selo.medio {
+  border-color: var(--brand-border);
+  color: var(--brand-light);
+}
+
+.latencia-selo.ruim {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.latencia-fps {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.latencia-painel {
+  margin-top: 6px;
+  width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-floating);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+.latencia-linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.latencia-linha > span:first-child {
+  color: var(--text-muted);
+}
+
+.latencia-linha.destaque {
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-faint);
+  font-size: 13px;
+}
+
+.latencia-linha.destaque > span:first-child,
+.latencia-linha.destaque strong {
+  color: var(--text-header);
+}
+
+.latencia-titulo {
+  margin-top: 8px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-subtle);
+}
+
+.latencia-aviso {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--danger-soft);
+  color: var(--danger-text);
+  line-height: 1.4;
+}
+
+.latencia-nota {
+  margin-top: 8px;
+  color: var(--text-subtle);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 /* ---------- Controle remoto ---------- */
 
 /* Enquanto se controla, a borda avisa que mouse e teclado estão indo para lá */

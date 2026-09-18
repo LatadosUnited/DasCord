@@ -235,7 +235,17 @@ class SfuVoiceService {
           contentHint: preset.contentHint,
           audio: false,
         },
-        { screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: preset.frameRate } }
+        {
+          screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: preset.frameRate },
+          ...(preset.jogo && {
+            videoCodec: 'h264',
+            // Várias camadas ao mesmo tempo custam tempo de codificação; quem joga
+            // quer a camada cheia, e só uma pessoa costuma estar assistindo
+            simulcast: false,
+            backupCodec: false,
+            degradationPreference: 'maintain-framerate',
+          }),
+        }
       );
     } catch (err) {
       // Fechar o seletor sem escolher nada não é erro
@@ -293,6 +303,14 @@ class SfuVoiceService {
     this.screen.forget(peerId);
     this.screenPublication(peerId)?.setSubscribed(false);
     this.screen.notify();
+  }
+
+  getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
+    return this.screenPublication(peerId)?.track?.receiver;
+  }
+
+  getScreenSender(): RTCRtpSender | undefined {
+    return this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track?.sender;
   }
 
   private screenPublication(identity: string): RemoteTrackPublication | undefined {

@@ -55,4 +55,8 @@ export interface VoiceEngine {
   /** `Uint8Array<ArrayBuffer>` porque o LiveKit não aceita buffer compartilhado */
   enviarEntrada(destino: string, dados: Uint8Array<ArrayBuffer>, confiavel: boolean, topico?: string): void;
   subscribeEntrada(cb: EntradaListener): () => void;
+  /** Por onde chega a tela de alguém que assistimos — é dele que saem as estatísticas */
+  getScreenReceiver(peerId: string): RTCRtpReceiver | undefined;
+  /** Por onde sai a nossa tela; na malha P2P, o de qualquer um que assiste */
+  getScreenSender(): RTCRtpSender | undefined;
 }

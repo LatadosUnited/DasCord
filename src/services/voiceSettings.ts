@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 
 // Preferências de voz: ficam só neste computador (localStorage)
 
-export type ScreenQualityId = '720p30' | '1080p30' | '1080p60';
+export type ScreenQualityId = '720p30' | '1080p30' | '720p60' | '1080p60';
 
 export interface VoiceSettings {
   inputDeviceId: string;
@@ -29,6 +29,13 @@ export interface ScreenQualityPreset {
   /** Limite por espectador: na malha P2P quem transmite envia uma cópia para cada um */
   maxBitrate: number;
   contentHint: 'detail' | 'motion';
+  /**
+   * Para jogar pela transmissão: H264 (que quase toda placa de vídeo codifica em
+   * hardware), uma camada só em vez de várias ao mesmo tempo, e, quando a banda
+   * apertar, perder resolução em vez de quadros. Só o SFU aplica o codec e as camadas;
+   * na malha P2P vale o resto do preset.
+   */
+  jogo: boolean;
 }
 
 export const SCREEN_QUALITY_PRESETS: ScreenQualityPreset[] = [
@@ -41,6 +48,7 @@ export const SCREEN_QUALITY_PRESETS: ScreenQualityPreset[] = [
     frameRate: 30,
     maxBitrate: 1_500_000,
     contentHint: 'detail',
+    jogo: false,
   },
   {
     id: '1080p30',
@@ -51,16 +59,29 @@ export const SCREEN_QUALITY_PRESETS: ScreenQualityPreset[] = [
     frameRate: 30,
     maxBitrate: 3_000_000,
     contentHint: 'detail',
+    jogo: false,
+  },
+  {
+    id: '720p60',
+    label: 'Jogo · 720p · 60 FPS',
+    description: 'O menor atraso, para jogar pela transmissão',
+    width: 1280,
+    height: 720,
+    frameRate: 60,
+    maxBitrate: 4_000_000,
+    contentHint: 'motion',
+    jogo: true,
   },
   {
     id: '1080p60',
-    label: '1080p · 60 FPS',
-    description: 'Movimento fluido, para jogos e vídeos',
+    label: 'Jogo · 1080p · 60 FPS',
+    description: 'Movimento fluido; pede mais da conexão',
     width: 1920,
     height: 1080,
     frameRate: 60,
     maxBitrate: 6_000_000,
     contentHint: 'motion',
+    jogo: true,
   },
 ];
 

@@ -14,7 +14,11 @@ export type MensagemControle =
   | { tipo: 'pedido' }
   | { tipo: 'aceito' }
   | { tipo: 'negado' }
-  | { tipo: 'encerrado' };
+  | { tipo: 'encerrado' }
+  /** `t` é o relógio de quem mediu: volta intacto, então não precisa de relógio sincronizado */
+  | { tipo: 'ping'; t: number }
+  /** `codificacao` é quanto quem transmite leva para codificar um quadro, em ms */
+  | { tipo: 'pong'; t: number; codificacao: number | null };
 
 export const codificarControle = (mensagem: MensagemControle): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(JSON.stringify(mensagem));
@@ -29,6 +33,15 @@ export function decodificarControle(dados: Uint8Array): MensagemControle | null 
       case 'negado':
       case 'encerrado':
         return { tipo: bruto.tipo };
+      case 'ping':
+        return Number.isFinite(bruto.t) ? { tipo: 'ping', t: bruto.t } : null;
+      case 'pong':
+        if (!Number.isFinite(bruto.t)) return null;
+        return {
+          tipo: 'pong',
+          t: bruto.t,
+          codificacao: Number.isFinite(bruto.codificacao) ? bruto.codificacao : null,
+        };
       default:
         return null;
     }

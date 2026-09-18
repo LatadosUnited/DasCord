@@ -214,6 +214,18 @@ class WebRTCVoiceService {
 
   getInputStatus = this.input.get;
 
+  getScreenReceiver(peerId: string): RTCRtpReceiver | undefined {
+    return this.peers
+      .get(peerId)
+      ?.pc.getReceivers()
+      .find((r) => r.track.kind === 'video' && r.track.readyState === 'live');
+  }
+
+  getScreenSender(): RTCRtpSender | undefined {
+    const [primeiro] = this.screen.watcherIds();
+    return primeiro ? this.peers.get(primeiro)?.screenTransceiver?.sender : undefined;
+  }
+
   // ---------- Entrada do controle remoto ----------
   //
   // A malha P2P não carrega entrada: controlar a máquina de alguém exige o SFU, que é

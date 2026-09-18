@@ -6,6 +6,8 @@ import { SCREEN_QUALITY_PRESETS, updateVoiceSettings, useVoiceSettings } from '.
 import { controleRemoto, useControleRemoto } from '../services/controleRemoto';
 import { useCapturaControle } from '../hooks/useCapturaControle';
 import { useMonitores } from '../hooks/useMonitores';
+import { useLatencia } from '../hooks/useLatencia';
+import { Latencia } from '../services/latencia';
 import './VoiceStage.css';
 
 const CONNECTION_LABELS: Record<Exclude<PeerConnectionStatus, 'connected'>, string> = {
@@ -127,6 +129,7 @@ export const VoiceStage: FC<VoiceStageProps> = ({
                 voice.stopWatchingScreen(id);
               }}
               controlando={controle.controlando === id}
+              medirDe={id}
               rodape={
                 podeControlar && screen.remote[id] ? (
                   <ControleBotao
@@ -284,10 +287,21 @@ interface ScreenTileProps {
   /** Enquanto verdadeiro, o que se faz sobre o vídeo vai para a máquina de quem transmite */
   controlando?: boolean;
   rodape?: ReactNode;
+  /** De quem é a tela, para medir o atraso dela; a nossa própria não tem atraso a medir */
+  medirDe?: string;
 }
 
-const ScreenTile: FC<ScreenTileProps> = ({ stream, label, detail, onClose, controlando = false, rodape }) => {
+const ScreenTile: FC<ScreenTileProps> = ({
+  stream,
+  label,
+  detail,
+  onClose,
+  controlando = false,
+  rodape,
+  medirDe,
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const latencia = useLatencia(medirDe && stream ? medirDe : null);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream;
@@ -313,6 +327,91 @@ const ScreenTile: FC<ScreenTileProps> = ({ stream, label, detail, onClose, contr
         </button>
       )}
       {rodape && <div className="screen-tile-rodape">{rodape}</div>}
+      {latencia && <SeloLatencia latencia={latencia} />}
+    </div>
+  );
+};
+
+const ms = (valor: number | null) => (valor === null ? '—' : `${Math.round(valor)} ms`);
+
+/** Faixas de quem joga: até 80 ms quase ninguém sente; depois de 150, todo mundo */
+const faixa = (total: number | null) =>
+  total === null ? '' : total <= 80 ? 'bom' : total <= 150 ? 'medio' : 'ruim';
+
+/**
+ * O número que importa para quem joga é do clique até ver o resultado. Ele vem somado
+ * de partes, e as partes ficam à mostra para dar para ver qual está pesando.
+ */
+const SeloLatencia: FC<{ latencia: Latencia }> = ({ latencia: l }) => {
+  const [aberto, setAberto] = useState(false);
+
+  return (
+    <div className="latencia">
+      <button
+        className={`latencia-selo ${faixa(l.total)}`}
+        onClick={() => setAberto((a) => !a)}
+        title="Atraso da transmissão — clique para ver de onde ele vem"
+      >
+        {l.total !== null ? `~${Math.round(l.total)} ms` : l.semResposta ? 'Sem ping' : 'Medindo...'}
+        {l.fps !== null && <span className="latencia-fps">{Math.round(l.fps)} fps</span>}
+      </button>
+
+      {aberto && (
+        <div className="latencia-painel">
+          <div className="latencia-linha destaque">
+            <span>Do seu clique até ver na tela</span>
+            <strong>{ms(l.total)}</strong>
+          </div>
+          <div className="latencia-linha">
+            <span>Seu comando chegar lá</span>
+            <span>{ms(l.entrada)}</span>
+          </div>
+          <div className="latencia-linha">
+            <span>A imagem chegar aqui</span>
+            <span>{ms(l.imagem)}</span>
+          </div>
+
+          <div className="latencia-titulo">De onde vem</div>
+          <div className="latencia-linha">
+            <span>Rede, ida e volta</span>
+            <span>{ms(l.idaEVolta)}</span>
+          </div>
+          <div className="latencia-linha">
+            <span>Codificar a imagem lá</span>
+            <span>{ms(l.codificacao)}</span>
+          </div>
+          <div className="latencia-linha">
+            <span>Espera contra oscilação aqui</span>
+            <span>{ms(l.jitterBuffer)}</span>
+          </div>
+          <div className="latencia-linha">
+            <span>Decodificar aqui</span>
+            <span>{ms(l.decodificacao)}</span>
+          </div>
+
+          <div className="latencia-titulo">Vídeo</div>
+          <div className="latencia-linha">
+            <span>{[l.resolucao, l.codec?.toUpperCase()].filter(Boolean).join(' · ') || '—'}</span>
+            <span>{l.perda === null ? '' : `${(l.perda * 100).toFixed(1)}% perdido`}</span>
+          </div>
+          {l.relay && (
+            <div className="latencia-aviso">
+              Passando por um relay (TURN): um salto a mais no caminho. Costuma ser firewall ou roteador
+              bloqueando conexão direta.
+            </div>
+          )}
+          {l.semResposta && (
+            <div className="latencia-aviso">
+              Quem transmite não respondeu ao ping — provavelmente está numa versão anterior do DasCord. Sem a ida e
+              volta, só dá para medir o que acontece deste lado.
+            </div>
+          )}
+          <div className="latencia-nota">
+            Ida e volta é medida; o resto das partes, estimado a partir dela. Sem relógio comum entre as duas
+            máquinas não dá para medir só a ida.
+          </div>
+        </div>
+      )}
     </div>
   );
 };

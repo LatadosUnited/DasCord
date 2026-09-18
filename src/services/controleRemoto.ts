@@ -22,6 +22,7 @@ import {
 import { CONTROLE_NEUTRO, conectarControle, desconectarControle, atualizarControle } from './controleVirtual';
 import { botaoMouse, listarMonitores, moverMouse, rodaMouse, tecla } from './entradaRemota';
 import { RUNS_IN_TAURI } from './appWindow';
+import { registrarPong, responderPing } from './latencia';
 
 /**
  * Corta tudo, dos dois lados. É atalho global do sistema porque quem precisa dele está
@@ -288,6 +289,10 @@ class ControleRemotoService {
   private receberCombinado(de: string, dados: Uint8Array) {
     const mensagem = decodificarControle(dados);
     if (!mensagem) return;
+
+    // A medição de atraso passa por aqui toda hora; não mexe em estado nem redesenha nada
+    if (mensagem.tipo === 'ping') return responderPing(de, mensagem.t);
+    if (mensagem.tipo === 'pong') return registrarPong(de, mensagem.t, mensagem.codificacao);
 
     switch (mensagem.tipo) {
       case 'pedido':
