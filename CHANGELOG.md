@@ -5,6 +5,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.5.1] - 2026-09-18
+
+### Adicionado
+- **Quem é controlado vê como a sessão está indo.** O aviso de que alguém está controlando seu PC ganhou uma linha com o caminho (direto ou pelo servidor), a ida e volta da rede até a outra pessoa e quanto sua placa leva para codificar cada quadro. O atraso da imagem continua só do lado de quem assiste: a imagem não volta para quem transmite, então não há como medir daqui.
+- **"Copiar números" no painel de atraso**, para quem assiste mandar tudo de uma vez no chat — caminho, atraso do clique até a tela e cada parte dele, resolução, codec, FPS e perda — em vez de ler item por item.
+
 ## [0.5.0] - 2026-09-18
 
 ### Adicionado
