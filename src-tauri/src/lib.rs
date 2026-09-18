@@ -65,6 +65,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // A tecla de corte do controle remoto precisa funcionar com o jogo em foco
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(controles::ControlesVirtuais::default())
         .manage(entrada::Entrada::default())
         .invoke_handler(tauri::generate_handler![

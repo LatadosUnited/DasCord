@@ -17,6 +17,7 @@ import { InviteModal } from './components/servers/InviteModal';
 import { ServerSettingsModal } from './components/servers/ServerSettingsModal';
 import { VersionBanner } from './components/VersionBanner';
 import { UpdateBanner } from './components/UpdateBanner';
+import { ControleRemotoAviso } from './components/ControleRemotoAviso';
 import { Channel, SettingsTab, User, UserStatus } from './types';
 import { apiUpdatePresence } from './services/users';
 import { apiLeaveServer } from './services/servers';
@@ -319,6 +320,7 @@ export function App() {
 
       <VersionBanner serverVersion={serverVersion} />
       <UpdateBanner state={appUpdate} />
+      <ControleRemotoAviso participants={voice.voiceState.participants} />
 
       {channelDialog && currentServer && (
         <ChannelDialog

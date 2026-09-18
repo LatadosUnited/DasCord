@@ -278,6 +278,79 @@
   color: var(--text-on-color);
 }
 
+/* ---------- Controle remoto ---------- */
+
+/* Enquanto se controla, a borda avisa que mouse e teclado estão indo para lá */
+.screen-tile.is-controlando {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand-glow), var(--shadow-md);
+}
+
+.screen-tile.is-controlando video {
+  cursor: crosshair;
+}
+
+/* Canto oposto ao do nome, por cima do vídeo */
+.screen-tile-rodape {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  max-width: calc(60% - 20px);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.screen-tile-controle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-overlay);
+  color: var(--text-header);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.screen-tile-controle:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+.screen-tile-controle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.screen-tile-controle.ativo {
+  border-color: var(--brand);
+  background-color: var(--brand);
+  color: var(--on-brand);
+}
+
+.screen-tile-monitor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-overlay);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.screen-tile-monitor select {
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background-color: var(--input-bg);
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
 .voice-card-live {
   position: absolute;
   top: 10px;

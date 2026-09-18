@@ -1,8 +1,11 @@
-import { FC, useEffect, useRef, useState } from 'react';
-import { Check, Eye, EyeOff, Mic, MicOff, Headphones, PhoneOff, ScreenShare, ScreenShareOff, Wifi, Volume2, X } from 'lucide-react';
+import { FC, ReactNode, useEffect, useRef, useState } from 'react';
+import { Check, Eye, EyeOff, Gamepad2, Mic, MicOff, Headphones, PhoneOff, ScreenShare, ScreenShareOff, Wifi, Volume2, X } from 'lucide-react';
 import { PeerConnectionStatus, VoiceParticipant, VoiceState } from '../types';
 import { useInputStatus, useScreenShare, useVoiceMode, voice } from '../services/voice';
 import { SCREEN_QUALITY_PRESETS, updateVoiceSettings, useVoiceSettings } from '../services/voiceSettings';
+import { controleRemoto, useControleRemoto } from '../services/controleRemoto';
+import { useCapturaControle } from '../hooks/useCapturaControle';
+import { useMonitores } from '../hooks/useMonitores';
 import './VoiceStage.css';
 
 const CONNECTION_LABELS: Record<Exclude<PeerConnectionStatus, 'connected'>, string> = {
@@ -49,6 +52,11 @@ export const VoiceStage: FC<VoiceStageProps> = ({
     setRetryingMic(false);
   };
 
+  const controle = useControleRemoto();
+  const monitores = useMonitores();
+  // Entrada remota só atravessa o servidor de mídia; na malha P2P o recurso não existe
+  const podeControlar = voiceMode === 'sfu';
+
   const isStreaming = screen.local !== null;
   const hasScreens = isStreaming || screen.watching.length > 0;
   const nameOf = (id: string) => participants.find((p) => p.id === id)?.name ?? 'Participante';
@@ -90,6 +98,23 @@ export const VoiceStage: FC<VoiceStageProps> = ({
                     ? '1 assistindo'
                     : `${screen.viewerCount} assistindo`
               }
+              rodape={
+                podeControlar && monitores.length > 1 ? (
+                  <label className="screen-tile-monitor">
+                    <span>Quem controla mexe em</span>
+                    <select
+                      value={controle.monitor ?? ''}
+                      onChange={(e) => controleRemoto.definirMonitor(e.target.value)}
+                    >
+                      {monitores.map((m) => (
+                        <option key={m.nome} value={m.nome}>
+                          {m.principal ? `${m.nome} (principal)` : m.nome} — {m.largura}×{m.altura}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : undefined
+              }
             />
           )}
           {screen.watching.map((id) => (
@@ -97,7 +122,32 @@ export const VoiceStage: FC<VoiceStageProps> = ({
               key={id}
               stream={screen.remote[id] ?? null}
               label={nameOf(id)}
-              onClose={() => voice.stopWatchingScreen(id)}
+              onClose={() => {
+                if (controle.controlando === id) controleRemoto.encerrar();
+                voice.stopWatchingScreen(id);
+              }}
+              controlando={controle.controlando === id}
+              rodape={
+                podeControlar && screen.remote[id] ? (
+                  <ControleBotao
+                    estado={
+                      controle.controlando === id
+                        ? 'controlando'
+                        : controle.aguardando === id
+                          ? 'aguardando'
+                          : 'livre'
+                    }
+                    // Um controle por vez: enquanto controlamos ou esperamos alguém, não pedimos a outro
+                    ocupado={
+                      (controle.controlando !== null && controle.controlando !== id) ||
+                      (controle.aguardando !== null && controle.aguardando !== id)
+                    }
+                    onPedir={() => controleRemoto.pedir(id)}
+                    onCancelar={() => controleRemoto.cancelarPedido()}
+                    onDevolver={() => controleRemoto.encerrar()}
+                  />
+                ) : undefined
+              }
             />
           ))}
         </div>
@@ -231,17 +281,22 @@ interface ScreenTileProps {
   label: string;
   detail?: string;
   onClose?: () => void;
+  /** Enquanto verdadeiro, o que se faz sobre o vídeo vai para a máquina de quem transmite */
+  controlando?: boolean;
+  rodape?: ReactNode;
 }
 
-const ScreenTile: FC<ScreenTileProps> = ({ stream, label, detail, onClose }) => {
+const ScreenTile: FC<ScreenTileProps> = ({ stream, label, detail, onClose, controlando = false, rodape }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream;
   }, [stream]);
 
+  useCapturaControle(videoRef, controlando && stream !== null);
+
   return (
-    <div className="screen-tile">
+    <div className={`screen-tile ${controlando ? 'is-controlando' : ''}`}>
       {stream ? (
         <video ref={videoRef} autoPlay playsInline muted />
       ) : (
@@ -257,7 +312,41 @@ const ScreenTile: FC<ScreenTileProps> = ({ stream, label, detail, onClose }) => 
           <X size={16} />
         </button>
       )}
+      {rodape && <div className="screen-tile-rodape">{rodape}</div>}
     </div>
+  );
+};
+
+interface ControleBotaoProps {
+  estado: 'livre' | 'aguardando' | 'controlando';
+  ocupado: boolean;
+  onPedir: () => void;
+  onCancelar: () => void;
+  onDevolver: () => void;
+}
+
+const ControleBotao: FC<ControleBotaoProps> = ({ estado, ocupado, onPedir, onCancelar, onDevolver }) => {
+  if (estado === 'controlando') {
+    return (
+      <button className="screen-tile-controle ativo" onClick={onDevolver}>
+        <Gamepad2 size={14} />
+        Devolver controle
+      </button>
+    );
+  }
+  if (estado === 'aguardando') {
+    return (
+      <button className="screen-tile-controle" onClick={onCancelar}>
+        <Gamepad2 size={14} />
+        Aguardando resposta... (cancelar)
+      </button>
+    );
+  }
+  return (
+    <button className="screen-tile-controle" onClick={onPedir} disabled={ocupado}>
+      <Gamepad2 size={14} />
+      Pedir controle
+    </button>
   );
 };
 

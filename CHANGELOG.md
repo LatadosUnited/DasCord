@@ -5,6 +5,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+- **Controle remoto, estilo Parsec.** Assistindo à tela de alguém num canal de voz, o botão "Pedir controle" pede para usar o PC da pessoa — teclado, mouse e controle. Ela vê o pedido em qualquer tela do app e decide; aceitando, o mouse sobre a tela dela, o teclado e o seu controle passam a valer lá. O controle vira um Xbox virtual na máquina dela, então jogo nenhum sabe a diferença.
+- **Quem é controlado nunca perde o controle da própria máquina.** Enquanto alguém controla, um aviso fica fixo no topo com o botão "Cortar agora", e `Ctrl+Shift+F12` corta de qualquer lugar, inclusive com o jogo em tela cheia. Parar de transmitir a tela, sair da chamada ou a outra pessoa cair também cortam, e o que ela estava segurando (tecla, botão) é solto na hora.
+- Com mais de um monitor, quem transmite escolhe em qual deles o mouse de quem controla cai.
+
 ## [0.3.0] - 2026-09-17
 
 ### Adicionado

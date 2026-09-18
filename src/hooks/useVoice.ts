@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Channel, User, VoiceParticipant, VoiceState } from '../types';
 import { SocketEvent } from '../services/socket';
 import { voice } from '../services/voice';
+import { controleRemoto } from '../services/controleRemoto';
 import {
   VoiceRosters,
   applyVoiceRosterEvent,
@@ -26,6 +27,18 @@ export function useVoice() {
   const [showVoiceStage, setShowVoiceStage] = useState(false);
   // Quem está em cada canal de voz, mesmo sem entrar na chamada
   const [voiceRosters, setVoiceRosters] = useState<VoiceRosters>({});
+
+  // O controle remoto vive enquanto a chamada vive: sair dela corta tudo
+  useEffect(() => {
+    if (!voiceState.connected) return;
+    controleRemoto.iniciar();
+    return () => controleRemoto.parar();
+  }, [voiceState.connected]);
+
+  // Quem saiu da chamada perde pedido e controle
+  useEffect(() => {
+    controleRemoto.sincronizarPresentes(voiceState.participants.map((p) => p.id));
+  }, [voiceState.participants]);
 
   // Lido dentro dos listeners do WebSocket, que não enxergam o estado atual
   const voiceChannelIdRef = useRef<string | undefined>(undefined);

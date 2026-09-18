@@ -20,7 +20,16 @@ import {
   ehConfiavel,
 } from './entradaProtocolo';
 import { CONTROLE_NEUTRO, conectarControle, desconectarControle, atualizarControle } from './controleVirtual';
-import { botaoMouse, moverMouse, rodaMouse, tecla } from './entradaRemota';
+import { botaoMouse, listarMonitores, moverMouse, rodaMouse, tecla } from './entradaRemota';
+import { RUNS_IN_TAURI } from './appWindow';
+
+/**
+ * Corta tudo, dos dois lados. É atalho global do sistema porque quem precisa dele está
+ * com o jogo em foco, não o DasCord. Quem controla também consegue apertá-lo pela
+ * entrada remota — e tudo bem: a única coisa que ele faz é tirar controle.
+ */
+export const ATALHO_CORTE = 'CommandOrControl+Shift+F12';
+export const ATALHO_CORTE_TEXTO = 'Ctrl+Shift+F12';
 
 export interface ControleRemotoSnapshot {
   /** Quem pediu controle desta máquina e ainda não foi respondido */
@@ -55,6 +64,7 @@ class ControleRemotoService {
   private botoesPresos = new Map<string, Set<number>>();
 
   private desinscrever: (() => void) | null = null;
+  private desinscreverTela: (() => void) | null = null;
   private listeners = new Set<() => void>();
   private snapshot: ControleRemotoSnapshot = VAZIO;
 
@@ -74,17 +84,82 @@ class ControleRemotoService {
       if (topico === TOPICO_CONTROLE) this.receberCombinado(de, dados);
       else if (topico === TOPICO_ENTRADA) this.receberEntrada(de, dados);
     });
+    // Parar de transmitir é parar de ser controlado: ninguém mexe às cegas nesta máquina
+    this.desinscreverTela = voice.subscribeScreenShare(() => {
+      if (!voice.getScreenShareSnapshot().local && this.permitidos.size > 0) this.cortarTudo();
+    });
+    this.registrarAtalho();
+    // Quase sempre o que se transmite é a tela principal: começa por ela, e quem hospeda troca
+    listarMonitores()
+      .then((monitores) => {
+        const principal = monitores.find((m) => m.principal) ?? monitores[0];
+        if (!this.monitor && principal) this.definirMonitor(principal.nome);
+      })
+      .catch(() => {});
   }
 
   /** Sair do canal de voz encerra tudo: ninguém continua com controle de uma chamada antiga */
   parar() {
     this.desinscrever?.();
     this.desinscrever = null;
+    this.desinscreverTela?.();
+    this.desinscreverTela = null;
+    this.removerAtalho();
+    this.encerrar();
     this.cortarTudo();
     this.pedidos.clear();
     this.controlando = null;
     this.aguardando = null;
     this.notificar();
+  }
+
+  /**
+   * Quem saiu da chamada perde o que tinha: pedido pendente e controle. Sem isso, alguém
+   * que caísse e voltasse encontraria o controle ainda liberado.
+   */
+  sincronizarPresentes(presentes: string[]) {
+    const aqui = new Set(presentes);
+    let mudou = false;
+    this.pedidos.forEach((quem) => {
+      if (!aqui.has(quem)) mudou = this.pedidos.delete(quem) || mudou;
+    });
+    Array.from(this.permitidos).forEach((quem) => {
+      if (!aqui.has(quem)) this.revogar(quem);
+    });
+    if (this.controlando && !aqui.has(this.controlando)) {
+      this.controlando = null;
+      mudou = true;
+    }
+    if (this.aguardando && !aqui.has(this.aguardando)) {
+      this.aguardando = null;
+      mudou = true;
+    }
+    if (mudou) this.notificar();
+  }
+
+  private async registrarAtalho() {
+    if (!RUNS_IN_TAURI) return;
+    try {
+      const { register } = await import('@tauri-apps/plugin-global-shortcut');
+      await register(ATALHO_CORTE, (evento) => {
+        if (evento.state !== 'Pressed') return;
+        this.cortarTudo();
+        this.encerrar();
+      });
+    } catch (e) {
+      // Outro programa já pode ter o atalho; o botão na tela continua valendo
+      console.warn('Não foi possível registrar o atalho de corte:', e);
+    }
+  }
+
+  private async removerAtalho() {
+    if (!RUNS_IN_TAURI) return;
+    try {
+      const { unregister } = await import('@tauri-apps/plugin-global-shortcut');
+      await unregister(ATALHO_CORTE);
+    } catch {
+      // Não estava registrado
+    }
   }
 
   // ---------- Lado de quem hospeda ----------
@@ -95,7 +170,8 @@ class ControleRemotoService {
   }
 
   permitir(quem: string) {
-    if (!this.monitor) return;
+    // Sem tela transmitida, quem controla estaria às cegas; sem monitor, o mouse não tem onde cair
+    if (!this.monitor || !voice.getScreenShareSnapshot().local) return;
     this.pedidos.delete(quem);
     this.permitidos.add(quem);
     // Cada pessoa com controle ganha o próprio Xbox virtual nesta máquina
@@ -182,6 +258,14 @@ class ControleRemotoService {
     this.notificar();
   }
 
+  /** Desiste de um pedido que ainda não foi respondido */
+  cancelarPedido() {
+    if (!this.aguardando) return;
+    this.enviarCombinado(this.aguardando, { tipo: 'encerrado' });
+    this.aguardando = null;
+    this.notificar();
+  }
+
   /** Devolve o controle por vontade própria */
   encerrar() {
     if (!this.controlando) return;
@@ -220,8 +304,10 @@ class ControleRemotoService {
         if (this.aguardando === de) this.aguardando = null;
         break;
       case 'encerrado':
-        // Serve para os dois lados: ou perdemos o controle, ou quem controlava desistiu
+        // Serve para os dois lados: ou perdemos o controle, ou quem controlava (ou só
+        // pedia) desistiu
         if (this.controlando === de) this.controlando = null;
+        this.pedidos.delete(de);
         if (this.permitidos.has(de)) {
           this.permitidos.delete(de);
           this.soltarTudo(de);
